@@ -1,7 +1,22 @@
 {
   "updates" : [
     {
-      "date": "27-07-2027",
+      "date": "27-07-2026",
+      "title": "Examples data",
+      "description": "Generated json data out of the examples",
+    },
+    {
+      "date": "27-07-2026",
+      "title": "Showcase",
+      "description": "Created a couple of examples. Simple stuff",
+    },
+    {
+      "date": "27-07-2026",
+      "title": "First changelog",
+      "description": "Generated the first CHANGELOG.json",
+    },
+    {
+      "date": "27-07-2026",
       "title": "Quick changelog tool",
       "description": "Added c++ sources for the changelog tool",
     },
