@@ -1,3 +1,6 @@
 
-[27-07-2027] Quick changelog tool: Added c++ sources for the changelog tool
+[27-07-2026] Examples data: Generated json data out of the examples
+[27-07-2026] Showcase: Created a couple of examples. Simple stuff
+[27-07-2026] First changelog: Generated the first CHANGELOG.json
+[27-07-2026] Quick changelog tool: Added c++ sources for the changelog tool
 [27-07-2026] Glang gets a git repo: Created git repo for glang
