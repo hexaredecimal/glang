@@ -97,7 +97,7 @@ int main(int argc, char**argv) {
       {
         std::cout << "      \"date\": \"" << c.date << "\"," << std::endl;
         std::cout << "      \"title\": \"" << c.title << "\"," << std::endl;
-        std::cout << "      \"description\": \"" << c.message << "\"," << std::endl;
+        std::cout << "      \"description\": \"" << c.message << "\"" << std::endl;
       }
       std::cout << "    }";
 
