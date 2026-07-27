@@ -1,0 +1,14 @@
+{
+  "updates" : [
+    {
+      "date": "27-07-2027",
+      "title": "Quick changelog tool",
+      "description": "Added c++ sources for the changelog tool",
+    },
+    {
+      "date": "27-07-2026",
+      "title": "Glang gets a git repo",
+      "description": "Created git repo for glang",
+    }
+  ]
+}
