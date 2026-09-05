@@ -13,7 +13,18 @@
 
 using namespace Glang;
 
-void compile(std::string& filePath, bool print_ir) {
+void write_il(std::string& path, std::string& ilcode) {
+  std::ofstream outFile(path);
+  if (!outFile.is_open()) {
+    std::cerr << "Error: Failed to write to file: " << path << std::endl;
+    return;
+  }
+
+  outFile << ilcode;
+}
+
+void compile(std::string& filePath, std::string targetOutPath = "main.il",
+             bool print_ir = false) {
   std::string code = "";
   std::ifstream file(filePath);
   if (!file.is_open()) {
