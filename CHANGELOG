@@ -1,0 +1,14 @@
+
+[27-07-2026] Examples data: Generated json data out of the examples
+[27-07-2026] Showcase: Created a couple of examples. Simple stuff
+[27-07-2026] First changelog: Generated the first CHANGELOG.json
+[27-07-2026] Quick changelog tool: Added c++ sources for the changelog tool
+[27-07-2026] Glang gets a git repo: Created git repo for glang
+[04-09-2026] Finalized the LSP and broke the VS code extension
+[05-09-2026] Fixed the VS code extension
+[05-09-2026] Deleted the old github repo.
+[05-09-2026] Recreated a new repo for glang.
+[05-09-2026] Re-commit all sources including the entire compiler.
+[05-09-2026] Added GPL-v3 as the license
+
+
