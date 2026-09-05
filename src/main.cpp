@@ -23,8 +23,7 @@ void write_il(std::string& path, std::string& ilcode) {
   outFile << ilcode;
 }
 
-void compile(std::string& filePath, std::string targetOutPath = "main.il",
-             bool print_ir = false) {
+void compile(std::string& filePath, std::string targetOutPath, bool print_ir) {
   std::string code = "";
   std::ifstream file(filePath);
   if (!file.is_open()) {
@@ -35,7 +34,6 @@ void compile(std::string& filePath, std::string targetOutPath = "main.il",
   ss << file.rdbuf();
   code = ss.str();
 
-  // Default to running codegen unless json requested
   Lexer lexer(filePath, code);
   std::vector<Token> tokens = lexer.tokenize();
 
@@ -47,7 +45,6 @@ void compile(std::string& filePath, std::string targetOutPath = "main.il",
 
   CodeGen codeGen;
   std::string ilCode;
-  std::string targetOutPath = "output.il";
 
   bool hasErrors =
       lexer.hasErrors() || parser.hasErrors() || checkResult.hasErrors();
@@ -57,13 +54,11 @@ void compile(std::string& filePath, std::string targetOutPath = "main.il",
     if (codeGen.hasErrors()) {
       hasErrors = true;
     } else if (!ilCode.empty()) {
-      std::ofstream outFile(targetOutPath);
-      if (outFile.is_open()) {
-        outFile << ilCode;
-      }
+      write_il(targetOutPath, ilCode);
     }
   }
 
+  // TODO: Add a better error printer.
   if (hasErrors) {
     for (const auto& err : lexer.errors()) {
       std::cerr << "[" << err.filename << ":" << err.line << ":" << err.column
@@ -93,11 +88,19 @@ void build_file(args::Subparser& parser) {
 
   args::Flag ir(parser, "ir", "Generate DotNET IL", {"ir"});
 
+  args::ValueFlag<std::string> outfile(parser, "output",
+                                       "Output file name or path", {"o"});
+
   parser.Parse();
 
   if (file) {
     std::string& file_path = args::get(file);
-    compile(file_path, ir.Get());
+
+    if (outfile)
+      compile(file_path, args::get(outfile), ir.Get());
+    else
+      compile(file_path, "output.il", ir.Get());
+
   } else
     std::cout << "TODO: Build project";
 }
