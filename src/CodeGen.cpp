@@ -1,8 +1,9 @@
 #include "compiler/CodeGen.hpp"
-#include <sstream>
+
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <sstream>
 
 namespace Glang {
 
@@ -12,9 +13,8 @@ void CodeGen::error(const Location& loc, const std::string& msg, const std::stri
 
 std::string CodeGen::sanitizeIdentifier(const std::string& name) {
     if (name.empty()) return "";
-    if (name == "main") return "main";
+    if (name == "main") return "_main";
 
-    // Note:  Handle generic syntax or scope resolution
     std::string res;
     for (size_t i = 0; i < name.size(); ++i) {
         char c = name[i];
@@ -291,11 +291,8 @@ std::string CodeGen::emitFunctionDecl(std::shared_ptr<FunctionDeclAST> decl) {
     m_emittedDecls.insert(sFnName);
 
     ILMethodContext ctx;
-    ctx.methodName = sFnName;
+    ctx.methodName = sFnName == "main" ? "_main" : sFnName;
     ctx.returnType = decl->returnTypeAst ? toILTypeFromAST(decl->returnTypeAst) : (decl->inferredType && decl->inferredType->returnType ? toILType(decl->inferredType->returnType) : "void");
-    if (sFnName == "main") {
-        ctx.returnType = "int32";
-    }
 
     for (size_t i = 0; i < decl->parameters.size(); ++i) {
         ctx.paramMap[decl->parameters[i].name] = static_cast<int>(i);
@@ -305,27 +302,30 @@ std::string CodeGen::emitFunctionDecl(std::shared_ptr<FunctionDeclAST> decl) {
 
     if (decl->body) {
         if (auto blockBody = std::dynamic_pointer_cast<BlockExprAST>(decl->body)) {
-            for (const auto& stmt : blockBody->statements) {
-                bodySS << emitStmt(stmt, ctx);
+          bool has_return_stmt = false;
+          for (const auto& stmt : blockBody->statements) {
+            if (auto returnAst =
+                    std::dynamic_pointer_cast<ReturnStmtAST>(stmt)) {
+              has_return_stmt = true;
             }
-            if (blockBody->yieldExpr) {
-                bodySS << emitExpr(blockBody->yieldExpr, ctx);
-                bodySS << "    ret\n";
-            } else if (sFnName == "main") {
-                bodySS << "    ldc.i4.0\n";
-                bodySS << "    ret\n";
-            } else if (ctx.returnType == "void") {
-                bodySS << "    ret\n";
-            } else {
-                bodySS << "    ldc.i4.0\n";
-                bodySS << "    ret\n";
-            }
+            bodySS << emitStmt(stmt, ctx);
+          }
+
+          if (!has_return_stmt && blockBody->yieldExpr) {
+            bodySS << emitExpr(blockBody->yieldExpr, ctx);
+            bodySS << "    ret\n";
+          } else if (!has_return_stmt && ctx.returnType == "void") {
+            bodySS << "    ret\n";
+          } else if (!has_return_stmt) {
+            bodySS << "    ldc.i4.0\n";
+            bodySS << "    ret\n";
+          }
         } else {
             bodySS << emitExpr(decl->body, ctx);
             if (ctx.returnType == "void") {
-                bodySS << "    ret\n";
+              bodySS << "    ret\n";
             } else {
-                bodySS << "    ret\n";
+              bodySS << "    ret\n";
             }
         }
     } else {
@@ -335,11 +335,11 @@ std::string CodeGen::emitFunctionDecl(std::shared_ptr<FunctionDeclAST> decl) {
     std::ostringstream ss;
     ss << "    .method public static " << ctx.returnType << " " << sFnName;
     if (!decl->typeParams.empty()) {
-        ss << "<";
-        for (size_t i = 0; i < decl->typeParams.size(); ++i) {
-            if (i > 0) ss << ", ";
-            ss << decl->typeParams[i];
-        }
+      ss << "<";
+      for (size_t i = 0; i < decl->typeParams.size(); ++i) {
+        if (i > 0) ss << ", ";
+        ss << decl->typeParams[i];
+      }
         ss << ">";
     }
     ss << "(";
@@ -349,9 +349,6 @@ std::string CodeGen::emitFunctionDecl(std::shared_ptr<FunctionDeclAST> decl) {
     }
     ss << ") cil managed\n    {\n";
 
-    if (sFnName == "main") {
-        ss << "        .entrypoint\n";
-    }
     ss << "        .maxstack 32\n";
 
     if (!ctx.locals.empty()) {
@@ -435,8 +432,8 @@ std::string CodeGen::emitVarDeclStmt(std::shared_ptr<VarDeclStmtAST> stmt, ILMet
 
     std::ostringstream ss;
     if (stmt->initializer) {
-        ss << emitExpr(stmt->initializer, ctx);
-        ss << "    stloc." << locIdx << "\n";
+      ss << emitExpr(stmt->initializer, ctx);
+      ss << "    stloc." << locIdx << "\n";
     } else {
       // Note:  Zero initialize valuetype on stack
       if (ilType.rfind("valuetype ", 0) == 0) {
@@ -719,9 +716,8 @@ std::string CodeGen::emitCallExpr(std::shared_ptr<CallExprAST> expr, ILMethodCon
     if (!expr) return "";
     std::ostringstream ss;
 
-    // Note:  Load arguments onto IL evaluation stack
     for (size_t i = 0; i < expr->arguments.size(); ++i) {
-        ss << emitExpr(expr->arguments[i], ctx);
+      ss << emitExpr(expr->arguments[i], ctx);
     }
 
     std::string calleeName;
@@ -1172,43 +1168,13 @@ std::string CodeGen::generate(std::shared_ptr<ProgramAST> program) {
     m_globalClosureCount = 0;
 
     std::ostringstream out;
-    out << "// Note:  "
-           "==================================================================="
-           "=========\n";
-    out << "// Note:  .NET Common Intermediate Language (CIL / MSIL) Textual "
-           "Assembly Representation\n";
-    out << "// Note:  Standard ECMA-335 Compatible • Stack-Allocated "
-           "Valuetypes • Managed Closures\n";
-    out << "// Note:  "
-           "==================================================================="
-           "=========\n\n";
 
-    out << ".assembly extern mscorlib\n";
-    out << "{\n";
-    out << "    .publickeytoken = (B7 7A 5C 56 19 34 E0 89)\n";
-    out << "    .ver 4:0:0:0\n";
-    out << "}\n\n";
-
-    out << ".assembly extern System.Runtime\n";
-    out << "{\n";
-    out << "    .ver 7:0:0:0\n";
-    out << "}\n\n";
-
-    out << ".assembly CompilerOutput\n";
-    out << "{\n";
-    out << "    .ver 1:0:0:0\n";
-    out << "}\n\n";
-
-    out << ".module CompilerOutput.dll\n";
-    out << ".imagebase 0x00400000\n";
-    out << ".file alignment 0x00000200\n";
-    out << ".stackreserve 0x00100000\n";
-    out << ".subsystem 0x0003  // Note:  IMAGE_SUBSYSTEM_WINDOWS_CUI\n";
-    out << ".corflags 0x00000001  // Note:  ILONLY\n\n";
+    out << ".assembly 'Main' {}\n";
+    out << ".module Main.exe \n";
 
     // Note:  Standard runtime ValueType for Slices
     out << "// Note:  --- Runtime Slice<T> Definition ---\n";
-    out << ".class public sequential ansi sealed beforefieldinit Slice`1<T>\n";
+    out << ".class Slice`1<T>\n";
     out << "       extends [mscorlib]System.ValueType\n";
     out << "{\n";
     out << "    .field public !0* ptr\n";
@@ -1230,79 +1196,75 @@ std::string CodeGen::generate(std::shared_ptr<ProgramAST> program) {
         else if (auto f = std::dynamic_pointer_cast<FunctionDeclAST>(decl)) functions.push_back(f);
     }
 
-    // Note:  Emit User Types (Structs, Unions, Enums)
     for (const auto& e : enums) out << emitEnumDecl(e);
     for (const auto& s : structs) out << emitStructDecl(s);
     for (const auto& u : unions) out << emitUnionDecl(u);
 
-    // Note:  Primary Program Class containing static methods & entrypoint
     out << "// Note:  --- Main Program Module & Methods ---\n";
-    out << ".class public auto ansi beforefieldinit Program\n";
+    out << ".class Program\n";
     out << "       extends [mscorlib]System.Object\n";
     out << "{\n";
 
     // Note:  Collect functions
     std::ostringstream methodsSS;
-    bool explicitMainFound = false;
 
     for (const auto& stmt : program->topStatements) {
-        if (auto vDecl = std::dynamic_pointer_cast<VarDeclStmtAST>(stmt)) {
-            if (vDecl->isStatic) {
-                std::string ilType = (vDecl->inferredType && !vDecl->inferredType->isUnknown()) ? toILType(vDecl->inferredType) : (vDecl->typeAst ? toILTypeFromAST(vDecl->typeAst) : "int32");
-                bool found = false;
-                for (const auto& sf : m_staticFields) {
-                    if (sf.name == vDecl->name) { found = true; break; }
-                }
-                if (!found) {
-                    m_staticFields.push_back({vDecl->name, ilType});
-                }
+      if (auto vDecl = std::dynamic_pointer_cast<VarDeclStmtAST>(stmt)) {
+        if (vDecl->isStatic) {
+          std::string ilType =
+              (vDecl->inferredType && !vDecl->inferredType->isUnknown())
+                  ? toILType(vDecl->inferredType)
+                  : (vDecl->typeAst ? toILTypeFromAST(vDecl->typeAst)
+                                    : "int32");
+          bool found = false;
+          for (const auto& sf : m_staticFields) {
+            if (sf.name == vDecl->name) {
+              found = true;
+              break;
             }
+          }
+          if (!found) {
+            m_staticFields.push_back({vDecl->name, ilType});
+          }
         }
+      }
     }
 
+    std::string main_ret = "";
     for (const auto& f : functions) {
-        if (!f) continue;
-        std::string fnName = !f->mangledName.empty() ? f->mangledName : (!f->ownerTypeName.empty() ? f->ownerTypeName + "_" + f->name : f->name);
-        std::string sFnName = sanitizeIdentifier(fnName);
-        if (sFnName == "main") {
-            explicitMainFound = true;
-            methodsSS << emitFunctionDecl(f);
-        } else {
-            methodsSS << emitFunctionDecl(f);
-        }
+      if (!f) continue;
+      std::string fnName =
+          !f->mangledName.empty()
+              ? f->mangledName
+              : (!f->ownerTypeName.empty() ? f->ownerTypeName + "_" + f->name
+                                           : f->name);
+      std::string sFnName = sanitizeIdentifier(fnName);
+      if (sFnName == "_main") {
+        main_ret = f->returnTypeAst
+                       ? toILTypeFromAST(f->returnTypeAst)
+                       : (f->inferredType && f->inferredType->returnType
+                              ? toILType(f->inferredType->returnType)
+                              : "void");
+        ;
+      }
+      methodsSS << emitFunctionDecl(f);
     }
 
-    if (!explicitMainFound) {
-        ILMethodContext mainCtx;
-        mainCtx.methodName = "main";
-        mainCtx.returnType = "int32";
+    methodsSS << "  .method public static int32 main() cil managed {\n";
+    methodsSS << "      .maxstack 32\n";
+    methodsSS << "      .entrypoint\n";
 
-        std::ostringstream bodySS;
-        for (const auto& stmt : program->topStatements) {
-            bodySS << emitStmt(stmt, mainCtx);
-        }
-        bodySS << "        ldc.i4.0\n";
-        bodySS << "        ret\n";
-
-        methodsSS << "    .method public static int32 main() cil managed\n    {\n";
-        methodsSS << "        .entrypoint\n";
-        methodsSS << "        .maxstack 32\n";
-        if (!mainCtx.locals.empty()) {
-            methodsSS << "        .locals init (\n";
-            for (size_t i = 0; i < mainCtx.locals.size(); ++i) {
-                methodsSS << "            [" << i << "] " << mainCtx.locals[i].ilType << " " << mainCtx.locals[i].name;
-                if (i + 1 < mainCtx.locals.size()) methodsSS << ",\n";
-                else methodsSS << "\n";
-            }
-            methodsSS << "        )\n";
-        }
-        methodsSS << bodySS.str();
-        methodsSS << "    }\n\n";
+    if (!main_ret.empty()) {
+      methodsSS << "        call " << main_ret << " Program::_main()\n";
+      methodsSS << "        ldc.i4.0\n";
+      methodsSS << "        ret\n";
+    } else {
+      methodsSS << "        ldc.i4.0\n";
+      methodsSS << "        ret\n";
     }
-
-    // Note:  Emit nested closure display classes inside Program
+    methodsSS << "  }\n";
     for (const auto& cls : m_closureClasses) {
-        out << cls;
+      out << cls;
     }
 
     for (const auto& sf : m_staticFields) {
