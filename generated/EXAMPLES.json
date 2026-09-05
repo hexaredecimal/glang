@@ -1,0 +1,12 @@
+{
+  "files": [
+    {
+      "name": "factorial.g",
+      "code": "import std.io : println;\r\n\r\nint fact(int n) {\r\n  if (n <= 1) \r\n    return 1; \r\n  else \r\n    return n * fact(n - 1);\r\n}\r\n\r\nvoid main() {\r\n auto n = 5;\r\n auto result = n.fact();\r\n println(\"result: %s\\n\", result);\r\n}"
+    },
+    {
+      "name": "hello.g",
+      "code": "import std.io : println;\r\n\r\nint main() {\r\n  println(\"Hello, world\"):\r\n}\r\n"
+    }
+  ]
+}
