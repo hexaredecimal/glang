@@ -202,6 +202,8 @@ public:
     bool isUserLiteral{false};
     std::string literalSuffix;
     std::string targetMangledName;
+    std::vector<TypePtr> targetParamTypes;
+    TypePtr targetReturnType{nullptr};
     CallExprAST(Location l, ExprPtr cal, std::vector<TypeASTPtr> tArgs, std::vector<ExprPtr> args)
         : ExprAST(std::move(l)), callee(std::move(cal)), templateArgs(std::move(tArgs)), arguments(std::move(args)) {}
     std::string toTreeString(int indent = 0) const override;
@@ -214,6 +216,8 @@ public:
     std::vector<TypeASTPtr> templateArgs;
     std::vector<ExprPtr> arguments;
     std::string targetMangledName;
+    std::vector<TypePtr> targetParamTypes;
+    TypePtr targetReturnType{nullptr};
     StaticMethodCallExprAST(Location l, std::string target, std::string method, std::vector<TypeASTPtr> tArgs, std::vector<ExprPtr> args)
         : ExprAST(std::move(l)), targetType(std::move(target)), methodName(std::move(method)), templateArgs(std::move(tArgs)), arguments(std::move(args)) {}
     std::string toTreeString(int indent = 0) const override;
@@ -484,6 +488,7 @@ public:
 struct ParamDecl {
     std::string name;
     TypeASTPtr typeAst;
+    bool isVariadic{false};
     std::string doc;
 };
 
