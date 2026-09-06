@@ -253,9 +253,12 @@ std::string TypeChecker::instantiateFunction(std::shared_ptr<FunctionDeclAST> fD
     std::vector<TypePtr> pTypes;
     for (const auto& p : fDecl->parameters) {
         TypePtr pType = resolveTypeAST(p.typeAst);
+        if (p.isVariadic && pType && !pType->isArray() && !pType->isSlice()) {
+            pType = Type::makeSlice(pType);
+        }
         TypePtr subPType = pType ? pType->substitute(bindings) : nullptr;
         pTypes.push_back(subPType);
-        instParams.push_back({p.name, makeTypeASTFromType(subPType, loc)});
+        instParams.push_back({p.name, makeTypeASTFromType(subPType, loc), p.isVariadic});
     }
 
     std::string instOwner = fDecl->ownerTypeName;
@@ -397,7 +400,11 @@ void TypeChecker::registerFunctions(std::shared_ptr<ProgramAST> program) {
             }
             std::vector<TypePtr> pTypes;
             for (const auto& p : fDecl->parameters) {
-                pTypes.push_back(resolveTypeAST(p.typeAst));
+                TypePtr pType = resolveTypeAST(p.typeAst);
+                if (p.isVariadic && pType && !pType->isArray() && !pType->isSlice()) {
+                    pType = Type::makeSlice(pType);
+                }
+                pTypes.push_back(pType);
             }
             TypePtr retType = resolveTypeAST(fDecl->returnTypeAst);
             m_symbolTable.exitScope();
@@ -754,6 +761,19 @@ static bool isAssignable(TypePtr src, TypePtr target) {
     return false;
 }
 
+static bool isVariadicArgAssignable(TypePtr src, TypePtr target) {
+    if (!src || !target) return true;
+    if (src->kind == TypeKind::Error || target->kind == TypeKind::Error) return true;
+    if (target->kind == TypeKind::Unknown || src->kind == TypeKind::Unknown) return true;
+    if (target->isPointer() && src->isPrimitive()) return true;
+    if ((target->isArray() || target->isSlice()) && (src->isArray() || src->isSlice())) {
+        if (target->elementType && src->elementType) {
+            return isVariadicArgAssignable(src->elementType, target->elementType);
+        }
+    }
+    return isAssignable(src, target);
+}
+
 void TypeChecker::checkDeclaration(DeclPtr decl) {
     if (auto fDecl = std::dynamic_pointer_cast<FunctionDeclAST>(decl)) {
         if (!fDecl->ownerTypeName.empty()) {
@@ -789,6 +809,9 @@ void TypeChecker::checkDeclaration(DeclPtr decl) {
         std::vector<TypePtr> pTypes;
         for (const auto& p : fDecl->parameters) {
             TypePtr pType = resolveTypeAST(p.typeAst);
+            if (p.isVariadic && pType && !pType->isArray() && !pType->isSlice()) {
+                pType = Type::makeSlice(pType);
+            }
             pTypes.push_back(pType);
             m_symbolTable.defineVar(p.name, pType, false);
         }
@@ -1619,8 +1642,10 @@ TypePtr TypeChecker::checkCallExpr(std::shared_ptr<CallExprAST> expr) {
             for (Symbol* fnSym : funcs) {
                 if (!fnSym->type || !fnSym->type->isFunction()) continue;
                 auto fType = fnSym->type;
+                bool isVariadic = fnSym->funcAST && !fnSym->funcAST->parameters.empty() && fnSym->funcAST->parameters.back().isVariadic;
+                size_t fixedArgCount = isVariadic && !fType->paramTypes.empty() ? fType->paramTypes.size() - 1 : fType->paramTypes.size();
 
-                if (expr->arguments.size() != fType->paramTypes.size()) {
+                if ((isVariadic && expr->arguments.size() < fixedArgCount) || (!isVariadic && expr->arguments.size() != fType->paramTypes.size())) {
                     continue;
                 }
 
@@ -1635,7 +1660,7 @@ TypePtr TypeChecker::checkCallExpr(std::shared_ptr<CallExprAST> expr) {
                 for (size_t i = 0; i < expr->arguments.size(); ++i) {
                     TypePtr argT = checkExpression(expr->arguments[i]);
                     argTypes.push_back(argT);
-                    if (fnSym->funcAST) {
+                    if (fnSym->funcAST && i < fType->paramTypes.size()) {
                         deduceTemplateArgs(fType->paramTypes[i], argT, bindings);
                     }
                 }
@@ -1653,12 +1678,23 @@ TypePtr TypeChecker::checkCallExpr(std::shared_ptr<CallExprAST> expr) {
 
                 if (match) {
                     for (size_t i = 0; i < argTypes.size(); ++i) {
-                        TypePtr expectedP = (i < fType->paramTypes.size() && fType->paramTypes[i]) ? fType->paramTypes[i]->substitute(bindings) : nullptr;
-                        if (!isAssignable(argTypes[i], expectedP)) {
+                        TypePtr expectedP = nullptr;
+                        if (isVariadic && i >= fixedArgCount && !fType->paramTypes.empty()) {
+                            TypePtr variadicTarget = fType->paramTypes.back();
+                            if (i == fixedArgCount && argTypes.size() == fType->paramTypes.size() && 
+                                argTypes[i] && (argTypes[i]->isArray() || argTypes[i]->isSlice())) {
+                                expectedP = variadicTarget;
+                            } else {
+                                expectedP = variadicTarget && (variadicTarget->isArray() || variadicTarget->isSlice()) ? variadicTarget->elementType : variadicTarget;
+                            }
+                        } else if (i < fType->paramTypes.size()) {
+                            expectedP = fType->paramTypes[i];
+                        }
+                        if (!expectedP || !isVariadicArgAssignable(argTypes[i], expectedP->substitute(bindings))) {
                             match = false;
                             break;
                         }
-                        score += (argTypes[i] && expectedP && argTypes[i]->equals(expectedP)) ? 2 : 1;
+                        score += (argTypes[i] && expectedP && argTypes[i]->equals(expectedP->substitute(bindings))) ? 2 : 1;
                     }
                 }
 
@@ -1679,7 +1715,43 @@ TypePtr TypeChecker::checkCallExpr(std::shared_ptr<CallExprAST> expr) {
                         expr->targetMangledName = instMangled;
                     }
                 }
-                TypePtr retT = (matchedFn && matchedFn->type && matchedFn->type->returnType) ? matchedFn->type->returnType->substitute(matchedBindings) : Type::makePrimitive("void");
+                if (matchedFn->funcAST && !matchedFn->funcAST->parameters.empty() && matchedFn->funcAST->parameters.back().isVariadic && expr->arguments.size() > matchedFn->funcAST->parameters.size()) {
+                    size_t fixedArgCount = matchedFn->funcAST->parameters.size() - 1;
+                    std::vector<ExprPtr> packedArgs;
+                    packedArgs.reserve(fixedArgCount + 1);
+                    for (size_t i = 0; i < fixedArgCount; ++i) {
+                        packedArgs.push_back(expr->arguments[i]);
+                    }
+                    std::vector<ExprPtr> restArgs(expr->arguments.begin() + static_cast<std::ptrdiff_t>(fixedArgCount), expr->arguments.end());
+                    auto varArray = std::make_shared<ArrayLiteralExprAST>(expr->loc, restArgs);
+
+                    TypePtr variadicTarget = matchedFn->type && !matchedFn->type->paramTypes.empty()
+                        ? matchedFn->type->paramTypes.back()
+                        : nullptr;
+                    TypePtr elemType = nullptr;
+                    if (variadicTarget && (variadicTarget->isArray() || variadicTarget->isSlice())) {
+                        elemType = variadicTarget->elementType;
+                    } else if (variadicTarget) {
+                        elemType = variadicTarget;
+                    } else {
+                        elemType = Type::makeUnknown();
+                    }
+
+                    varArray->inferredType = Type::makeArray(elemType, static_cast<int>(restArgs.size()));
+                    packedArgs.push_back(varArray);
+                    expr->arguments = packedArgs;
+                }
+
+                expr->targetParamTypes = matchedFn->type && !matchedFn->type->paramTypes.empty()
+                    ? matchedFn->type->paramTypes
+                    : std::vector<TypePtr>{};
+                for (auto& p : expr->targetParamTypes) {
+                    p = p ? p->substitute(matchedBindings) : nullptr;
+                }
+                expr->targetReturnType = matchedFn->type && matchedFn->type->returnType
+                    ? matchedFn->type->returnType->substitute(matchedBindings)
+                    : Type::makePrimitive("void");
+                TypePtr retT = expr->targetReturnType;
                 return retT;
             }
 
@@ -1820,6 +1892,16 @@ TypePtr TypeChecker::checkStaticMethodCallExpr(std::shared_ptr<StaticMethodCallE
             }
         }
 
+        expr->targetParamTypes = bestSm->type && !bestSm->type->paramTypes.empty()
+            ? bestSm->type->paramTypes
+            : std::vector<TypePtr>{};
+        for (auto& p : expr->targetParamTypes) {
+            p = p ? p->substitute(bestBindings) : nullptr;
+        }
+        expr->targetReturnType = bestSm->type && bestSm->type->returnType
+            ? bestSm->type->returnType->substitute(bestBindings)
+            : Type::makePrimitive("void");
+
         Symbol* typeSym = m_symbolTable.lookupType(expr->targetType);
         if (typeSym && typeSym->type && typeSym->type->isStruct() && !typeSym->type->typeArgs.empty()) {
             std::vector<TypePtr> tArgs;
@@ -1828,7 +1910,7 @@ TypePtr TypeChecker::checkStaticMethodCallExpr(std::shared_ptr<StaticMethodCallE
             instantiateType(structType, expr->loc);
         }
 
-        return (bestSm && bestSm->type && bestSm->type->returnType) ? bestSm->type->returnType->substitute(bestBindings) : Type::makePrimitive("void");
+        return expr->targetReturnType;
     }
 
     Symbol* smSym = smSyms[0];
@@ -2079,7 +2161,7 @@ TypePtr TypeChecker::checkArrayLiteralExpr(std::shared_ptr<ArrayLiteralExprAST> 
     }
 
     if (expectedType && (expectedType->isArray() || expectedType->isSlice())) {
-        if (expectedType->elementType && expectedType->elementType->equals(firstElemType)) {
+        if (expectedType->elementType && isVariadicArgAssignable(firstElemType, expectedType->elementType)) {
             expr->inferredType = expectedType;
             return expectedType;
         }
