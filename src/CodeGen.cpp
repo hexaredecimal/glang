@@ -303,15 +303,28 @@ std::string CodeGen::emitFunctionDecl(std::shared_ptr<FunctionDeclAST> decl) {
     if (decl->body) {
         if (auto blockBody = std::dynamic_pointer_cast<BlockExprAST>(decl->body)) {
           bool has_return_stmt = false;
+          bool has_explicit_yield = false;
+          ExprPtr lastStmtExpr = nullptr;
           for (const auto& stmt : blockBody->statements) {
-            if (auto returnAst =
-                    std::dynamic_pointer_cast<ReturnStmtAST>(stmt)) {
+            if (std::dynamic_pointer_cast<ReturnStmtAST>(stmt)) {
               has_return_stmt = true;
+            }
+            if (std::dynamic_pointer_cast<YieldStmtAST>(stmt)) {
+              has_explicit_yield = true;
+            }
+            if (auto eStmt = std::dynamic_pointer_cast<ExprStmtAST>(stmt)) {
+              lastStmtExpr = eStmt->expr;
             }
             bodySS << emitStmt(stmt, ctx);
           }
 
-          if (!has_return_stmt && blockBody->yieldExpr) {
+          // Only emit yieldExpr separately if it was an explicit `yield` (not the
+          // implicit lastExpr promotion the parser applies to every block).
+          bool yieldAlreadyEmitted = !has_explicit_yield &&
+                                     blockBody->yieldExpr &&
+                                     blockBody->yieldExpr == lastStmtExpr;
+
+          if (!has_return_stmt && blockBody->yieldExpr && !yieldAlreadyEmitted) {
             bodySS << emitExpr(blockBody->yieldExpr, ctx);
             bodySS << "    ret\n";
           } else if (!has_return_stmt && ctx.returnType == "void") {
@@ -716,10 +729,6 @@ std::string CodeGen::emitCallExpr(std::shared_ptr<CallExprAST> expr, ILMethodCon
     if (!expr) return "";
     std::ostringstream ss;
 
-    for (size_t i = 0; i < expr->arguments.size(); ++i) {
-      ss << emitExpr(expr->arguments[i], ctx);
-    }
-
     std::string calleeName;
     if (!expr->targetMangledName.empty()) {
         calleeName = sanitizeIdentifier(expr->targetMangledName);
@@ -729,17 +738,60 @@ std::string CodeGen::emitCallExpr(std::shared_ptr<CallExprAST> expr, ILMethodCon
         calleeName = "anonymous_call";
     }
 
-    std::string retType = (expr->inferredType) ? toILType(expr->inferredType) : "void";
-    if (calleeName == "print" || calleeName == "println" || calleeName == "writeln") {
-        ss << "    call void [mscorlib]System.Console::WriteLine()\n";
-        return ss.str();
+    std::string retType = (expr->targetReturnType) ? toILType(expr->targetReturnType) : ((expr->inferredType) ? toILType(expr->inferredType) : "void");
+
+    std::vector<TypePtr> sigParams = expr->targetParamTypes;
+    if (sigParams.empty() && expr->arguments.size() > 0) {
+        sigParams.reserve(expr->arguments.size());
+        for (size_t i = 0; i < expr->arguments.size(); ++i) {
+            sigParams.push_back(expr->arguments[i]->inferredType ? expr->arguments[i]->inferredType : Type::makePrimitive("int32"));
+        }
+    }
+
+    bool variadicPackedArray = !sigParams.empty() &&
+        sigParams.back() && (sigParams.back()->isArray() || sigParams.back()->isSlice()) &&
+        !expr->arguments.empty() &&
+        std::dynamic_pointer_cast<ArrayLiteralExprAST>(expr->arguments.back());
+
+    if (variadicPackedArray) {
+        auto packed = std::dynamic_pointer_cast<ArrayLiteralExprAST>(expr->arguments.back());
+        auto targetArrayType = sigParams.back();
+        std::string elemType = targetArrayType->elementType ? toILType(targetArrayType->elementType) : "int32";
+
+        size_t fixedCount = expr->arguments.size() - 1;
+        for (size_t i = 0; i < fixedCount; ++i) {
+            ss << emitExpr(expr->arguments[i], ctx);
+        }
+
+        ss << "    ldc.i4 " << packed->elements.size() << "\n";
+        ss << "    newarr " << elemType << "\n";
+        for (size_t i = 0; i < packed->elements.size(); ++i) {
+            ss << "    dup\n";
+            ss << "    ldc.i4 " << i << "\n";
+            ss << emitExpr(packed->elements[i], ctx);
+            if (elemType == "int32") ss << "    stelem.i4\n";
+            else if (elemType == "unsigned int32") ss << "    stelem.i4\n";
+            else if (elemType == "int64" || elemType == "unsigned int64") ss << "    stelem.i8\n";
+            else if (elemType == "float32") ss << "    stelem.r4\n";
+            else if (elemType == "float64") ss << "    stelem.r8\n";
+            else if (elemType == "bool") ss << "    stelem.i1\n";
+            else if (elemType.back() == '*') {
+                ss << "    conv.i\n";
+                ss << "    stelem.i\n";
+            } else {
+                ss << "    stelem " << elemType << "\n";
+            }
+        }
+    } else {
+        for (size_t i = 0; i < expr->arguments.size(); ++i) {
+            ss << emitExpr(expr->arguments[i], ctx);
+        }
     }
 
     ss << "    call " << retType << " Program::" << calleeName << "(";
-    for (size_t i = 0; i < expr->arguments.size(); ++i) {
+    for (size_t i = 0; i < sigParams.size(); ++i) {
         if (i > 0) ss << ", ";
-        std::string argType = (expr->arguments[i]->inferredType) ? toILType(expr->arguments[i]->inferredType) : "int32";
-        ss << argType;
+        ss << (sigParams[i] ? toILType(sigParams[i]) : "int32");
     }
     ss << ")\n";
 
@@ -750,19 +802,62 @@ std::string CodeGen::emitStaticMethodCallExpr(std::shared_ptr<StaticMethodCallEx
     if (!expr) return "";
     std::ostringstream ss;
 
-    for (size_t i = 0; i < expr->arguments.size(); ++i) {
-        ss << emitExpr(expr->arguments[i], ctx);
-    }
-
     std::string targetClass = sanitizeIdentifier(expr->targetType);
     std::string methodName = sanitizeIdentifier(expr->methodName);
-    std::string retType = (expr->inferredType) ? toILType(expr->inferredType) : "void";
+    std::string retType = (expr->targetReturnType) ? toILType(expr->targetReturnType) : ((expr->inferredType) ? toILType(expr->inferredType) : "void");
+
+    std::vector<TypePtr> sigParams = expr->targetParamTypes;
+    if (sigParams.empty() && expr->arguments.size() > 0) {
+        sigParams.reserve(expr->arguments.size());
+        for (size_t i = 0; i < expr->arguments.size(); ++i) {
+            sigParams.push_back(expr->arguments[i]->inferredType ? expr->arguments[i]->inferredType : Type::makePrimitive("int32"));
+        }
+    }
+
+    bool variadicPackedArray = !sigParams.empty() &&
+        sigParams.back() && (sigParams.back()->isArray() || sigParams.back()->isSlice()) &&
+        !expr->arguments.empty() &&
+        std::dynamic_pointer_cast<ArrayLiteralExprAST>(expr->arguments.back());
+
+    if (variadicPackedArray) {
+        auto packed = std::dynamic_pointer_cast<ArrayLiteralExprAST>(expr->arguments.back());
+        auto targetArrayType = sigParams.back();
+        std::string elemType = targetArrayType->elementType ? toILType(targetArrayType->elementType) : "int32";
+
+        size_t fixedCount = expr->arguments.size() - 1;
+        for (size_t i = 0; i < fixedCount; ++i) {
+            ss << emitExpr(expr->arguments[i], ctx);
+        }
+
+        ss << "    ldc.i4 " << packed->elements.size() << "\n";
+        ss << "    newarr " << elemType << "\n";
+        for (size_t i = 0; i < packed->elements.size(); ++i) {
+            ss << "    dup\n";
+            ss << "    ldc.i4 " << i << "\n";
+            ss << emitExpr(packed->elements[i], ctx);
+            if (elemType == "int32") ss << "    stelem.i4\n";
+            else if (elemType == "unsigned int32") ss << "    stelem.i4\n";
+            else if (elemType == "int64" || elemType == "unsigned int64") ss << "    stelem.i8\n";
+            else if (elemType == "float32") ss << "    stelem.r4\n";
+            else if (elemType == "float64") ss << "    stelem.r8\n";
+            else if (elemType == "bool") ss << "    stelem.i1\n";
+            else if (elemType.back() == '*') {
+                ss << "    conv.i\n";
+                ss << "    stelem.i\n";
+            } else {
+                ss << "    stelem " << elemType << "\n";
+            }
+        }
+    } else {
+        for (size_t i = 0; i < expr->arguments.size(); ++i) {
+            ss << emitExpr(expr->arguments[i], ctx);
+        }
+    }
 
     ss << "    call " << retType << " Program::" << targetClass << "_" << methodName << "(";
-    for (size_t i = 0; i < expr->arguments.size(); ++i) {
+    for (size_t i = 0; i < sigParams.size(); ++i) {
         if (i > 0) ss << ", ";
-        std::string argType = (expr->arguments[i]->inferredType) ? toILType(expr->arguments[i]->inferredType) : "int32";
-        ss << argType;
+        ss << (sigParams[i] ? toILType(sigParams[i]) : "int32");
     }
     ss << ")\n";
 
@@ -1107,6 +1202,7 @@ std::string CodeGen::emitArrayLiteralExpr(std::shared_ptr<ArrayLiteralExprAST> e
     if (!expr) return "";
     std::ostringstream ss;
     std::string elemType = (expr->inferredType && expr->inferredType->elementType) ? toILType(expr->inferredType->elementType) : "int32";
+    bool isPointerElement = !elemType.empty() && elemType.back() == '*';
 
     ss << "    ldc.i4 " << expr->elements.size() << "\n";
     ss << "    newarr " << elemType << "\n";
@@ -1115,10 +1211,18 @@ std::string CodeGen::emitArrayLiteralExpr(std::shared_ptr<ArrayLiteralExprAST> e
         ss << "    dup\n";
         ss << "    ldc.i4 " << i << "\n";
         ss << emitExpr(expr->elements[i], ctx);
-        if (elemType == "int32") ss << "    stelem.i4\n";
-        else if (elemType == "float32") ss << "    stelem.r4\n";
-        else if (elemType == "float64") ss << "    stelem.r8\n";
-        else ss << "    stelem " << elemType << "\n";
+        if (isPointerElement) {
+            ss << "    conv.i\n";
+            ss << "    stelem.i\n";
+        } else if (elemType == "int32") {
+            ss << "    stelem.i4\n";
+        } else if (elemType == "float32") {
+            ss << "    stelem.r4\n";
+        } else if (elemType == "float64") {
+            ss << "    stelem.r8\n";
+        } else {
+            ss << "    stelem " << elemType << "\n";
+        }
     }
 
     return ss.str();
