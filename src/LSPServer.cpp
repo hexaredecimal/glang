@@ -1,4 +1,4 @@
-#ifndef NOMINMAX
+﻿#ifndef NOMINMAX
 #define NOMINMAX
 #endif
 #ifdef max
@@ -74,57 +74,6 @@ namespace Glang {
 		catch (...) {
 			return fs::path(".");
 		}
-	}
-
-	static void logLSP(const std::string& msg) {
-		static std::mutex s_logMutex;
-		std::lock_guard<std::mutex> lock(s_logMutex);
-
-		std::cerr << msg << std::endl;
-
-		try {
-			static fs::path logFilePath = getCompilerDirectory() / "lsp_debug.log";
-			static std::ofstream logFile(logFilePath, std::ios::out | std::ios::app);
-			if (logFile.is_open()) {
-				auto now = std::chrono::system_clock::now();
-				auto in_time_t = std::chrono::system_clock::to_time_t(now);
-				auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
-				std::tm buf{};
-#if defined(_WIN32)
-				localtime_s(&buf, &in_time_t);
-#else
-				localtime_r(&in_time_t, &buf);
-#endif
-				char timeStr[64];
-				std::strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", &buf);
-				logFile << "[" << timeStr << "." << std::setfill('0') << std::setw(3) << ms.count() << "] " << msg << "\n";
-				logFile.flush();
-			}
-		}
-		catch (...) {}
-	}
-
-	template<typename MessageType>
-	static void printMessageMethod() {
-		const auto type = lsp::message::IsNotification<MessageType> ? "notification" : "request";
-		logLSP(std::string("Server received ") + type + " '" + std::string(MessageType::Method) + "'");
-	}
-
-	template<typename MessageType>
-	static void printMessagePayload(const typename MessageType::Params& params) {
-		const auto json = lsp::toJson(typename MessageType::Params(params));
-		logLSP(std::string("payload: ") + lsp::json::stringify(json, true));
-	}
-
-	template<typename MessageType>
-	static void printMessage(const typename MessageType::Params& params) {
-		printMessageMethod<MessageType>();
-		printMessagePayload<MessageType>(params);
-	}
-
-	template<typename MessageType>
-	static void printMessage() {
-		printMessageMethod<MessageType>();
 	}
 
 	static std::string uriToPath(const std::string& uri) {
@@ -222,7 +171,6 @@ namespace Glang {
                 m_messageHandler.processIncomingMessages();
               }
             } catch (const std::exception& e) {
-              logLSP(std::string("ERROR: ") + e.what());
               return EXIT_FAILURE;
             }
             return EXIT_SUCCESS;
@@ -230,9 +178,6 @@ namespace Glang {
 
           auto initialize(lsp::InitializeParams&& params)
               -> lsp::requests::Initialize::Result {
-            logLSP("INITIALIZE");
-            printMessage<lsp::requests::Initialize>(params);
-
             if (m_state > State::Uninitialized) {
               throw lsp::RequestError(lsp::MessageError::InvalidRequest,
                                       "Already initialized");
@@ -265,14 +210,11 @@ namespace Glang {
           }
 
           void initialized(lsp::notifications::Initialized::Params&& params) {
-            printMessage<lsp::notifications::Initialized>(params);
-            logLSP("Client successfully initialized!");
           }
 
           void textDocumentDidOpen(
               lsp::notifications::TextDocument_DidOpen::Params&& params) {
             verifyInitialized();
-            printMessage<lsp::notifications::TextDocument_DidOpen>(params);
 
             std::string uriStr = params.textDocument.uri.toString();
             if (m_parent) {
@@ -285,7 +227,6 @@ namespace Glang {
           void textDocumentDidChange(
               lsp::notifications::TextDocument_DidChange::Params&& params) {
             verifyInitialized();
-            printMessage<lsp::notifications::TextDocument_DidChange>(params);
 
             std::string uriStr = params.textDocument.uri.toString();
             if (m_parent && !params.contentChanges.empty()) {
@@ -304,13 +245,11 @@ namespace Glang {
           void textDocumentDidSave(
               lsp::notifications::TextDocument_DidSave::Params&& params) {
             verifyInitialized();
-            printMessage<lsp::notifications::TextDocument_DidSave>(params);
             publishDiagnostics(params.textDocument.uri);
           }
 
           void textDocumentDidClose(
               lsp::notifications::TextDocument_DidClose::Params&& params) {
-            printMessage<lsp::notifications::TextDocument_DidClose>(params);
             std::string uriStr = params.textDocument.uri.toString();
             if (m_parent) {
               m_parent->closeDocument(uriStr);
@@ -319,7 +258,6 @@ namespace Glang {
 
           auto hover(lsp::requests::TextDocument_Hover::Params&& params)
               -> lsp::requests::TextDocument_Hover::Result {
-            printMessage<lsp::requests::TextDocument_Hover>(params);
             verifyInitialized();
 
             std::string uriStr = params.textDocument.uri.toString();
@@ -405,7 +343,7 @@ namespace Glang {
                 return lsp::requests::TextDocument_Hover::Result(std::move(h));
               }
             } catch (const std::exception& e) {
-              logLSP(std::string("Hover query exception: ") + e.what());
+              // TODO: Report
             }
 
             return lsp::Null{};
@@ -414,7 +352,6 @@ namespace Glang {
           auto completion(
               lsp::requests::TextDocument_Completion::Params&& params)
               -> lsp::requests::TextDocument_Completion::Result {
-            printMessage<lsp::requests::TextDocument_Completion>(params);
             verifyInitialized();
 
             std::string uriStr = params.textDocument.uri.toString();
@@ -515,7 +452,7 @@ namespace Glang {
                 }
               }
             } catch (const std::exception& e) {
-              logLSP(std::string("Completion exception: ") + e.what());
+              // TODO: report error
             }
 
             return compList;
@@ -524,7 +461,6 @@ namespace Glang {
           auto definition(
               lsp::requests::TextDocument_Definition::Params&& params)
               -> lsp::requests::TextDocument_Definition::Result {
-            printMessage<lsp::requests::TextDocument_Definition>(params);
             verifyInitialized();
 
             std::string uriStr = params.textDocument.uri.toString();
@@ -560,7 +496,7 @@ namespace Glang {
                 return loc;
               }
             } catch (const std::exception& e) {
-              logLSP(std::string("Definition query exception: ") + e.what());
+              // TODO: Report error
             }
 
             return lsp::Null{};
@@ -569,7 +505,6 @@ namespace Glang {
           auto documentSymbol(
               lsp::requests::TextDocument_DocumentSymbol::Params&& params)
               -> lsp::requests::TextDocument_DocumentSymbol::Result {
-            printMessage<lsp::requests::TextDocument_DocumentSymbol>(params);
             verifyInitialized();
 
             std::string uriStr = params.textDocument.uri.toString();
@@ -657,7 +592,7 @@ namespace Glang {
                 }
               }
             } catch (const std::exception& e) {
-              logLSP(std::string("DocumentSymbol exception: ") + e.what());
+              // TODO: Report error
             }
 
             return symbols;
@@ -666,7 +601,6 @@ namespace Glang {
           auto signatureHelp(
               lsp::requests::TextDocument_SignatureHelp::Params&& params)
               -> lsp::requests::TextDocument_SignatureHelp::Result {
-            printMessage<lsp::requests::TextDocument_SignatureHelp>(params);
             verifyInitialized();
 
             std::string uriStr = params.textDocument.uri.toString();
@@ -880,20 +814,18 @@ namespace Glang {
                 return sigHelp;
               }
             } catch (const std::exception& e) {
-              logLSP(std::string("SignatureHelp exception: ") + e.what());
+              // TODO: Report error
             }
 
             return lsp::Null{};
           }
 
           auto shutdown() -> lsp::requests::Shutdown::Result {
-            printMessage<lsp::requests::Shutdown>();
             m_state.store(State::Shutdown);
             return {};
           }
 
           void exit() {
-            printMessage<lsp::notifications::Exit>();
             m_state.store(State::Inactive);
           }
 
@@ -917,7 +849,7 @@ namespace Glang {
               diag.range.end.line = diag.range.start.line;
               diag.range.end.character = diag.range.start.character + tokLen;
               diag.severity = lsp::DiagnosticSeverity::Error;
-              diag.source = "c-like-compiler";
+              diag.source = "glang-lsp";
               diag.message = d.message;
               params.diagnostics.push_back(std::move(diag));
             }
@@ -1014,12 +946,6 @@ namespace Glang {
           }
         };
 
-        // Note:
-        // ============================================================================
-        // Note:  LSPServer Public Methods
-        // Note:
-        // ============================================================================
-
         LSPServer::LSPServer(const LSPServerConfig& config)
             : m_config(config) {}
 
@@ -1027,19 +953,11 @@ namespace Glang {
 
         bool LSPServer::run() {
           fs::path dir = getCompilerDirectory();
-          logLSP("=================================================");
-          logLSP(
-              "[LSP Startup] Language Server initialized with lsp-framework");
-          logLSP("[LSP Startup] Compiler Directory: " + dir.string());
-          logLSP("[LSP Startup] Debug Log File: " +
-                 (dir / "lsp_debug.log").string());
-
-          logLSP("Starting stdio server...");
           try {
             LanguageServer server(lsp::io::standardIO(), this);
             return server.run() == EXIT_SUCCESS;
           } catch (const std::exception& e) {
-            logLSP(std::string("Stdio server error: ") + e.what());
+            // TODO: Report error
             return false;
           }
         }
@@ -1069,8 +987,6 @@ namespace Glang {
             state.symbolTable = tc.symbolTable();
             for (const auto& e : tcRes.errors) state.diagnostics.push_back(e);
           } catch (const std::exception& e) {
-            logLSP(std::string("Exception during document parsing: ") +
-                   e.what());
             CompilerError err;
             err.filename = filePath;
             err.message = std::string("Internal parsing error: ") + e.what();
@@ -1078,7 +994,7 @@ namespace Glang {
             err.column = 1;
             state.diagnostics.push_back(err);
           } catch (...) {
-            logLSP("Unknown exception during document parsing");
+            // TODO: Report error
           }
 
           m_documents[uri] = std::move(state);
