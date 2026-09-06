@@ -311,9 +311,7 @@ std::string mangleFunctionName(const std::string& name, const std::string& owner
     if (name == "main" && ownerType.empty()) {
         return "main";
     }
-    if ((name == "print" || name == "println" || name == "writeln") && ownerType.empty()) {
-        return name;
-    }
+
 
     std::string mangled;
     if (!ownerType.empty()) {
