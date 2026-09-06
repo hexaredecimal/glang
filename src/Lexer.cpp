@@ -398,10 +398,14 @@ std::vector<Token> Lexer::tokenize() {
                 tok = Token(TokenKind::Colon, ":", loc);
               break;
             case '.':
-              if (match('.'))
-                tok = Token(TokenKind::DotDot, "..", loc);
-              else
+              if (match('.')) {
+                if (match('.'))
+                  tok = Token(TokenKind::DotDotDot, "...", loc);
+                else
+                  tok = Token(TokenKind::DotDot, "..", loc);
+              } else {
                 tok = Token(TokenKind::Dot, ".", loc);
+              }
               break;
             case ',':
               tok = Token(TokenKind::Comma, ",", loc);
