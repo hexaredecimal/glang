@@ -98,6 +98,7 @@ enum class TokenKind {
     DoubleColon,   // ::
     Dot,           // .
     DotDot,        // ..
+    DotDotDot,     // ...
     Comma,         // ,
     Semicolon,     // ;
     Colon,         // :
