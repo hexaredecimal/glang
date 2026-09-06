@@ -548,7 +548,17 @@ DeclPtr Parser::parseFunctionDecl() {
     consume(TokenKind::LParen, "Expected '(' for function parameter list");
     std::vector<ParamDecl> params;
     while (!isAtEnd() && !check(TokenKind::RParen)) {
+        match(TokenKind::Dot); // Optional marker before variadic parameter type, e.g. .void* ... args
+
         TypeASTPtr pType = parseType();
+        bool isVariadicParam = match(TokenKind::DotDotDot);
+        if (isVariadicParam) {
+            auto variadicType = std::make_shared<TypeASTNode>(pType ? pType->loc : peek().loc, pType ? (pType->name + "[]") : "auto[]");
+            variadicType->isArray = true;
+            variadicType->elementType = pType;
+            pType = variadicType;
+        }
+
         std::string pName;
         if (pType && !pType->declName.empty()) {
             pName = pType->declName;
@@ -556,7 +566,7 @@ DeclPtr Parser::parseFunctionDecl() {
             Token pNameTok = consume(TokenKind::Identifier, "Expected parameter name");
             pName = pNameTok.lexeme;
         }
-        params.push_back({pName, pType});
+        params.push_back({pName, pType, isVariadicParam});
         if (!match(TokenKind::Comma)) break;
     }
     consume(TokenKind::RParen, "Expected ')' after function parameters");
