@@ -91,6 +91,7 @@ std::string tokenKindToString(TokenKind kind) {
         case TokenKind::DoubleColon: return "::";
         case TokenKind::Dot: return ".";
         case TokenKind::DotDot: return "..";
+        case TokenKind::DotDotDot: return "...";
         case TokenKind::Comma: return ",";
         case TokenKind::Semicolon: return ";";
         case TokenKind::Colon: return ":";
