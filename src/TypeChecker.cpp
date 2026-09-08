@@ -134,9 +134,9 @@ TypePtr TypeChecker::resolveTypeAST(TypeASTPtr ast) {
         TypePtr resolved = resolveTypeAST(aliasAST->targetTypeAst);
         m_symbolTable.exitScope();
         if (resolved) {
-            auto res = std::make_shared<Type>(*resolved);
-            if (ast->isConst) res->isConst = true;
-            return res;
+            auto aliasType = Type::makeAlias(sym->name, resolved);
+            if (ast->isConst) aliasType->isConst = true;
+            return aliasType;
         }
         return Type::makeError();
     }
@@ -681,17 +681,34 @@ static bool isFloatType(TypePtr t) {
     return n == "float" || n == "double";
 }
 
+static bool isVoidPointerType(TypePtr t) {
+    return t && t->isPointer() && t->pointerBase && t->pointerBase->isVoid();
+}
+
+static bool isVoidPointerTarget(TypePtr t) {
+    return t && t->isPointer() && t->pointerBase && t->pointerBase->isVoid();
+}
+
 static bool isAssignable(TypePtr src, TypePtr target) {
     if (!src || !target) return true;
     if (src->kind == TypeKind::Error || target->kind == TypeKind::Error) return true;
     if (target->kind == TypeKind::Unknown || src->kind == TypeKind::Unknown) return true;
 
-    if (target->equals(src)) return true;
+    // Unwrap alias types for assignability checks so aliases behave like their targets.
+    // This keeps type aliases comparable by their underlying base type while preserving the
+    // alias spelling in source code and diagnostics.
+    TypePtr effSrc = src ? src->underlyingType() : nullptr;
+    TypePtr effTarget = target ? target->underlyingType() : nullptr;
+    if (!effSrc) effSrc = src;
+    if (!effTarget) effTarget = target;
 
-    TypePtr effTarget = (target->isPointer() && target->pointerBase && (target->pointerBase->isFunction() || target->pointerBase->isClosure()))
-                        ? target->pointerBase : target;
-    TypePtr effSrc = (src->isPointer() && src->pointerBase && (src->pointerBase->isFunction() || src->pointerBase->isClosure()))
-                     ? src->pointerBase : src;
+    if (effTarget->equals(effSrc)) return true;
+
+    // For function pointer comparisons, consider pointer base if pointing to function/closure
+    if (effTarget->isPointer() && effTarget->pointerBase && (effTarget->pointerBase->isFunction() || effTarget->pointerBase->isClosure()))
+        effTarget = effTarget->pointerBase;
+    if (effSrc->isPointer() && effSrc->pointerBase && (effSrc->pointerBase->isFunction() || effSrc->pointerBase->isClosure()))
+        effSrc = effSrc->pointerBase;
 
     if ((effTarget->isFunction() || effTarget->isClosure()) &&
         (effSrc->isFunction() || effSrc->isClosure())) {
@@ -765,6 +782,11 @@ static bool isVariadicArgAssignable(TypePtr src, TypePtr target) {
     if (!src || !target) return true;
     if (src->kind == TypeKind::Error || target->kind == TypeKind::Error) return true;
     if (target->kind == TypeKind::Unknown || src->kind == TypeKind::Unknown) return true;
+
+    if (isVoidPointerTarget(target)) {
+        return true;
+    }
+
     if (target->isPointer() && src->isPrimitive()) return true;
     if ((target->isArray() || target->isSlice()) && (src->isArray() || src->isSlice())) {
         if (target->elementType && src->elementType) {
@@ -1358,6 +1380,82 @@ bool TypeChecker::deduceTemplateArgs(TypePtr paramType, TypePtr argType, std::ma
 }
 
 TypePtr TypeChecker::checkCallExpr(std::shared_ptr<CallExprAST> expr) {
+    // Local helper: resolve best overload for a set of candidate functions
+    auto findBestOverload = [&](const std::vector<Symbol*>& funcs) -> std::pair<Symbol*, std::map<std::string, TypePtr>> {
+        Symbol* matchedFn = nullptr;
+        std::map<std::string, TypePtr> matchedBindings;
+        int maxScore = -1;
+
+        for (Symbol* fnSym : funcs) {
+            if (!fnSym->type || !fnSym->type->isFunction()) continue;
+            auto fType = fnSym->type;
+            bool isVariadic = fnSym->funcAST && !fnSym->funcAST->parameters.empty() && fnSym->funcAST->parameters.back().isVariadic;
+            size_t fixedArgCount = isVariadic && !fType->paramTypes.empty() ? fType->paramTypes.size() - 1 : fType->paramTypes.size();
+
+            if ((isVariadic && expr->arguments.size() < fixedArgCount) || (!isVariadic && expr->arguments.size() != fType->paramTypes.size())) {
+                continue;
+            }
+
+            std::map<std::string, TypePtr> bindings;
+            if (!expr->templateArgs.empty() && fnSym->funcAST) {
+                for (size_t i = 0; i < expr->templateArgs.size() && i < fnSym->funcAST->typeParams.size(); ++i) {
+                    bindings[fnSym->funcAST->typeParams[i]] = resolveTypeAST(expr->templateArgs[i]);
+                }
+            }
+
+            std::vector<TypePtr> argTypes;
+            for (size_t i = 0; i < expr->arguments.size(); ++i) {
+                TypePtr argT = checkExpression(expr->arguments[i]);
+                argTypes.push_back(argT);
+                if (fnSym->funcAST && i < fType->paramTypes.size()) {
+                    deduceTemplateArgs(fType->paramTypes[i], argT, bindings);
+                }
+            }
+
+            bool match = true;
+            int score = 0;
+            if (fnSym->funcAST) {
+                for (const auto& tp : fnSym->funcAST->typeParams) {
+                    if (bindings.find(tp) == bindings.end() || !bindings.at(tp) || bindings.at(tp)->isUnknown()) {
+                        match = false;
+                        break;
+                    }
+                }
+            }
+
+            if (match) {
+                for (size_t i = 0; i < argTypes.size(); ++i) {
+                    TypePtr expectedP = nullptr;
+                    if (isVariadic && i >= fixedArgCount && !fType->paramTypes.empty()) {
+                        TypePtr variadicTarget = fType->paramTypes.back();
+                        if (i == fixedArgCount && argTypes.size() == fType->paramTypes.size() &&
+                            argTypes[i] && (argTypes[i]->isArray() || argTypes[i]->isSlice())) {
+                            expectedP = variadicTarget;
+                        } else {
+                            expectedP = variadicTarget && (variadicTarget->isArray() || variadicTarget->isSlice()) ? variadicTarget->elementType : variadicTarget;
+                        }
+                    } else if (i < fType->paramTypes.size()) {
+                        expectedP = fType->paramTypes[i];
+                    }
+                    if (!expectedP || !isVariadicArgAssignable(argTypes[i], expectedP->substitute(bindings))) {
+                        match = false;
+                        break;
+                    }
+                    score += (argTypes[i] && expectedP && argTypes[i]->equals(expectedP->substitute(bindings))) ? 2 : 1;
+                }
+            }
+
+            if (match && score > maxScore) {
+                maxScore = score;
+                matchedFn = fnSym;
+                matchedBindings = bindings;
+            }
+        }
+
+        return {matchedFn, matchedBindings};
+    };
+
+    // If this is a user literal, resolve and apply the function immediately
     if (expr->isUserLiteral) {
         std::string suffix = expr->literalSuffix;
         std::vector<Symbol*> funcs = m_symbolTable.lookupFunctions(suffix);
@@ -1376,6 +1474,85 @@ TypePtr TypeChecker::checkCallExpr(std::shared_ptr<CallExprAST> expr) {
             error(expr->loc, "Function '" + suffix + "' used as user defined literal must be annotated with [userLiteral]");
             return Type::makeError();
         }
+
+        // Try to find best overload and apply it (reuse direct-call matching semantics)
+        auto [matchedFn, matchedBindings] = findBestOverload(funcs);
+        if (matchedFn) {
+            if (!matchedFn->mangledName.empty()) expr->targetMangledName = matchedFn->mangledName;
+            if (matchedFn->funcAST) {
+                std::string instMangled = instantiateFunction(matchedFn->funcAST, matchedBindings, expr->loc);
+                if (!instMangled.empty()) expr->targetMangledName = instMangled;
+            }
+            expr->callee = std::make_shared<IdentifierExprAST>(expr->loc, matchedFn->name);
+            expr->targetParamTypes = matchedFn->type && !matchedFn->type->paramTypes.empty()
+                ? matchedFn->type->paramTypes
+                : std::vector<TypePtr>{};
+            for (auto& p : expr->targetParamTypes) p = p ? p->substitute(matchedBindings) : nullptr;
+            // Resolve return type from the function AST when available to avoid
+            // stale/corrupted types stored in the symbol entry. Temporarily
+            // bind generic params in the symbol table so resolveTypeAST can
+            // look them up.
+            TypePtr ret = nullptr;
+            if (matchedFn->funcAST) {
+                m_symbolTable.enterScope();
+                for (const auto& tp : matchedFn->funcAST->typeParams) {
+                    auto it = matchedBindings.find(tp);
+                    if (it != matchedBindings.end() && it->second) m_symbolTable.defineType(tp, it->second);
+                    else m_symbolTable.defineType(tp, Type::makeGenericParam(tp));
+                }
+                ret = matchedFn->funcAST->returnTypeAst ? resolveTypeAST(matchedFn->funcAST->returnTypeAst) : Type::makePrimitive("void");
+                m_symbolTable.exitScope();
+            } else {
+                ret = (matchedFn && matchedFn->type && matchedFn->type->returnType) ? matchedFn->type->returnType->substitute(matchedBindings) : Type::makePrimitive("void");
+            }
+            return ret ? ret : Type::makePrimitive("void");
+        }
+
+        // Fallthrough: mimic previous behavior for better diagnostics
+        Symbol* fnSym = funcs[0];
+        auto fType = fnSym ? fnSym->type : nullptr;
+        if (fType && fType->isFunction()) {
+            if (expr->arguments.size() != fType->paramTypes.size()) {
+                error(expr->loc, "Function '" + suffix + "' expected " +
+                      std::to_string(fType->paramTypes.size()) + " arguments, but got " + std::to_string(expr->arguments.size()));
+            } else {
+                std::map<std::string, TypePtr> bindings;
+                if (!expr->templateArgs.empty() && fnSym->funcAST) {
+                    for (size_t i = 0; i < expr->templateArgs.size() && i < fnSym->funcAST->typeParams.size(); ++i) {
+                        bindings[fnSym->funcAST->typeParams[i]] = resolveTypeAST(expr->templateArgs[i]);
+                    }
+                }
+                for (size_t i = 0; i < expr->arguments.size(); ++i) {
+                    TypePtr argT = checkExpression(expr->arguments[i]);
+                    if (fnSym->funcAST && i < fType->paramTypes.size()) deduceTemplateArgs(fType->paramTypes[i], argT, bindings);
+                }
+                bool unbound = false;
+                if (fnSym->funcAST) {
+                    for (const auto& tp : fnSym->funcAST->typeParams) {
+                        if (bindings.find(tp) == bindings.end() || !bindings.at(tp) || bindings.at(tp)->isUnknown()) {
+                            unbound = true;
+                            break;
+                        }
+                    }
+                }
+                if (unbound) {
+                    error(expr->loc, "Could not deduce template arguments for function '" + suffix + "'");
+                } else {
+                    for (size_t i = 0; i < expr->arguments.size(); ++i) {
+                        TypePtr argT = checkExpression(expr->arguments[i]);
+                        TypePtr expectedP = (i < fType->paramTypes.size() && fType->paramTypes[i]) ? fType->paramTypes[i]->substitute(bindings) : nullptr;
+                        if (!isAssignable(argT, expectedP)) {
+                            error(expr->loc, "Type mismatch for argument " + std::to_string(i + 1) +
+                                  " in call to '" + suffix + "': cannot convert '" +
+                                  (argT ? argT->toString() : "unknown") + "' to '" + expectedP->toString() + "'");
+                        }
+                    }
+                }
+            }
+        } else {
+            error(expr->loc, "Invalid call to function '" + suffix + "'");
+        }
+        return Type::makeError();
     }
 
     // Check if member access call for UFCS: e.g. `list.push_back()`
@@ -1467,7 +1644,23 @@ TypePtr TypeChecker::checkCallExpr(std::shared_ptr<CallExprAST> expr) {
                 }
                 expr->targetMangledName = targetName;
                 expr->callee = std::make_shared<IdentifierExprAST>(expr->loc, bestSm->name);
-                return (bestSm && bestSm->type && bestSm->type->returnType) ? bestSm->type->returnType->substitute(bestBindings) : Type::makePrimitive("void");
+                // Resolve return type preferentially from the function AST to avoid stale symbol types
+                {
+                    TypePtr ret = nullptr;
+                    if (bestSm->funcAST) {
+                        m_symbolTable.enterScope();
+                        for (const auto& tp : bestSm->funcAST->typeParams) {
+                            auto it = bestBindings.find(tp);
+                            if (it != bestBindings.end() && it->second) m_symbolTable.defineType(tp, it->second);
+                            else m_symbolTable.defineType(tp, Type::makeGenericParam(tp));
+                        }
+                        ret = bestSm->funcAST->returnTypeAst ? resolveTypeAST(bestSm->funcAST->returnTypeAst) : Type::makePrimitive("void");
+                        m_symbolTable.exitScope();
+                    } else {
+                        ret = (bestSm && bestSm->type && bestSm->type->returnType) ? bestSm->type->returnType->substitute(bestBindings) : Type::makePrimitive("void");
+                    }
+                    return ret ? ret : Type::makePrimitive("void");
+                }
             }
         }
 
@@ -1565,8 +1758,22 @@ TypePtr TypeChecker::checkCallExpr(std::shared_ptr<CallExprAST> expr) {
                 }
                 expr->targetMangledName = targetName;
                 expr->callee = std::make_shared<IdentifierExprAST>(expr->loc, bestFn->name);
-                TypePtr retT = (bestFn && bestFn->type && bestFn->type->returnType) ? bestFn->type->returnType->substitute(bestBindings) : Type::makePrimitive("void");
-                return retT;
+                {
+                    TypePtr ret = nullptr;
+                    if (bestFn->funcAST) {
+                        m_symbolTable.enterScope();
+                        for (const auto& tp : bestFn->funcAST->typeParams) {
+                            auto it = bestBindings.find(tp);
+                            if (it != bestBindings.end() && it->second) m_symbolTable.defineType(tp, it->second);
+                            else m_symbolTable.defineType(tp, Type::makeGenericParam(tp));
+                        }
+                        ret = bestFn->funcAST->returnTypeAst ? resolveTypeAST(bestFn->funcAST->returnTypeAst) : Type::makePrimitive("void");
+                        m_symbolTable.exitScope();
+                    } else {
+                        ret = (bestFn && bestFn->type && bestFn->type->returnType) ? bestFn->type->returnType->substitute(bestBindings) : Type::makePrimitive("void");
+                    }
+                    return ret ? ret : Type::makePrimitive("void");
+                }
             }
 
             Symbol* fnSym = funcs[0];
@@ -1737,7 +1944,8 @@ TypePtr TypeChecker::checkCallExpr(std::shared_ptr<CallExprAST> expr) {
                         elemType = Type::makeUnknown();
                     }
 
-                    varArray->inferredType = Type::makeArray(elemType, static_cast<int>(restArgs.size()));
+                    TypePtr expectedVariadicArray = Type::makeSlice(elemType);
+                    varArray->inferredType = checkArrayLiteralExpr(varArray, expectedVariadicArray);
                     packedArgs.push_back(varArray);
                     expr->arguments = packedArgs;
                 }
@@ -1748,11 +1956,22 @@ TypePtr TypeChecker::checkCallExpr(std::shared_ptr<CallExprAST> expr) {
                 for (auto& p : expr->targetParamTypes) {
                     p = p ? p->substitute(matchedBindings) : nullptr;
                 }
-                expr->targetReturnType = matchedFn->type && matchedFn->type->returnType
-                    ? matchedFn->type->returnType->substitute(matchedBindings)
-                    : Type::makePrimitive("void");
-                TypePtr retT = expr->targetReturnType;
-                return retT;
+                {
+                    TypePtr ret = nullptr;
+                    if (matchedFn->funcAST) {
+                        m_symbolTable.enterScope();
+                        for (const auto& tp : matchedFn->funcAST->typeParams) {
+                            auto it = matchedBindings.find(tp);
+                            if (it != matchedBindings.end() && it->second) m_symbolTable.defineType(tp, it->second);
+                            else m_symbolTable.defineType(tp, Type::makeGenericParam(tp));
+                        }
+                        ret = matchedFn->funcAST->returnTypeAst ? resolveTypeAST(matchedFn->funcAST->returnTypeAst) : Type::makePrimitive("void");
+                        m_symbolTable.exitScope();
+                    } else {
+                        ret = (matchedFn && matchedFn->type && matchedFn->type->returnType) ? matchedFn->type->returnType->substitute(matchedBindings) : Type::makePrimitive("void");
+                    }
+                    return ret ? ret : Type::makePrimitive("void");
+                }
             }
 
             Symbol* fnSym = funcs[0];
@@ -1898,9 +2117,22 @@ TypePtr TypeChecker::checkStaticMethodCallExpr(std::shared_ptr<StaticMethodCallE
         for (auto& p : expr->targetParamTypes) {
             p = p ? p->substitute(bestBindings) : nullptr;
         }
-        expr->targetReturnType = bestSm->type && bestSm->type->returnType
-            ? bestSm->type->returnType->substitute(bestBindings)
-            : Type::makePrimitive("void");
+        {
+            TypePtr ret = nullptr;
+            if (bestSm->funcAST) {
+                m_symbolTable.enterScope();
+                for (const auto& tp : bestSm->funcAST->typeParams) {
+                    auto it = bestBindings.find(tp);
+                    if (it != bestBindings.end() && it->second) m_symbolTable.defineType(tp, it->second);
+                    else m_symbolTable.defineType(tp, Type::makeGenericParam(tp));
+                }
+                ret = bestSm->funcAST->returnTypeAst ? resolveTypeAST(bestSm->funcAST->returnTypeAst) : Type::makePrimitive("void");
+                m_symbolTable.exitScope();
+            } else {
+                ret = bestSm->type && bestSm->type->returnType ? bestSm->type->returnType->substitute(bestBindings) : Type::makePrimitive("void");
+            }
+            expr->targetReturnType = ret ? ret : Type::makePrimitive("void");
+        }
 
         Symbol* typeSym = m_symbolTable.lookupType(expr->targetType);
         if (typeSym && typeSym->type && typeSym->type->isStruct() && !typeSym->type->typeArgs.empty()) {
@@ -2153,9 +2385,15 @@ TypePtr TypeChecker::checkArrayLiteralExpr(std::shared_ptr<ArrayLiteralExprAST> 
     }
 
     TypePtr firstElemType = checkExpression(expr->elements[0]);
+    bool permissiveVoidVariadic = expectedType && (expectedType->isArray() || expectedType->isSlice()) && isVoidPointerType(expectedType->elementType);
+
     for (size_t i = 1; i < expr->elements.size(); ++i) {
         TypePtr t = checkExpression(expr->elements[i]);
-        if (!firstElemType->equals(t)) {
+        if (permissiveVoidVariadic) {
+            if (expectedType->elementType && !isVariadicArgAssignable(t, expectedType->elementType)) {
+                error(expr->loc, "Inconsistent element types in array literal");
+            }
+        } else if (!firstElemType->equals(t)) {
             error(expr->loc, "Inconsistent element types in array literal");
         }
     }
@@ -2165,6 +2403,12 @@ TypePtr TypeChecker::checkArrayLiteralExpr(std::shared_ptr<ArrayLiteralExprAST> 
             expr->inferredType = expectedType;
             return expectedType;
         }
+    }
+
+    if (permissiveVoidVariadic) {
+        TypePtr res = Type::makeArray(expectedType->elementType, static_cast<int>(expr->elements.size()));
+        expr->inferredType = res;
+        return res;
     }
 
     TypePtr res = Type::makeArray(firstElemType, static_cast<int>(expr->elements.size()));
