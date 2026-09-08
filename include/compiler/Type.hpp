@@ -21,6 +21,7 @@ enum class TypeKind {
     Function,
     Closure,
     Tuple,
+    Alias,
     Unknown,
     Error
 };
@@ -65,6 +66,9 @@ public:
     // Note:  Tuple details
     std::vector<TypePtr> tupleElementTypes;
 
+    // Note: Alias target (if this Type is an alias)
+    TypePtr aliasTarget{nullptr};
+
     Type(TypeKind k, std::string n = "") : kind(k), name(std::move(n)) {}
 
     static TypePtr makePrimitive(std::string name);
@@ -79,24 +83,26 @@ public:
     static TypePtr makeFunction(std::vector<TypePtr> params, TypePtr ret);
     static TypePtr makeClosure(std::vector<TypePtr> params, TypePtr ret);
     static TypePtr makeTuple(std::vector<TypePtr> elementTypes);
+    static TypePtr makeAlias(const std::string& aliasName, TypePtr target);
     static TypePtr makeUnknown();
     static TypePtr makeError();
 
-    bool isPointer() const { return kind == TypeKind::Pointer; }
-    bool isPrimitive() const { return kind == TypeKind::Primitive; }
-    bool isVoid() const { return kind == TypeKind::Primitive && name == "void"; }
-    bool isArray() const { return kind == TypeKind::Array; }
-    bool isSlice() const { return kind == TypeKind::Slice; }
-    bool isHashMap() const { return kind == TypeKind::HashMap; }
-    bool isStruct() const { return kind == TypeKind::Struct; }
-    bool isUnion() const { return kind == TypeKind::Union; }
-    bool isEnum() const { return kind == TypeKind::Enum; }
-    bool isGenericParam() const { return kind == TypeKind::GenericParam; }
-    bool isFunction() const { return kind == TypeKind::Function; }
-    bool isClosure() const { return kind == TypeKind::Closure; }
-    bool isTuple() const { return kind == TypeKind::Tuple; }
-    bool isUnknown() const { return kind == TypeKind::Unknown; }
+    bool isPointer() const { return kind == TypeKind::Pointer || (kind == TypeKind::Alias && aliasTarget && aliasTarget->isPointer()); }
+    bool isPrimitive() const { return kind == TypeKind::Primitive || (kind == TypeKind::Alias && aliasTarget && aliasTarget->isPrimitive()); }
+    bool isVoid() const { return (kind == TypeKind::Primitive && name == "void") || (kind == TypeKind::Alias && aliasTarget && aliasTarget->isVoid()); }
+    bool isArray() const { return kind == TypeKind::Array || (kind == TypeKind::Alias && aliasTarget && aliasTarget->isArray()); }
+    bool isSlice() const { return kind == TypeKind::Slice || (kind == TypeKind::Alias && aliasTarget && aliasTarget->isSlice()); }
+    bool isHashMap() const { return kind == TypeKind::HashMap || (kind == TypeKind::Alias && aliasTarget && aliasTarget->isHashMap()); }
+    bool isStruct() const { return kind == TypeKind::Struct || (kind == TypeKind::Alias && aliasTarget && aliasTarget->isStruct()); }
+    bool isUnion() const { return kind == TypeKind::Union || (kind == TypeKind::Alias && aliasTarget && aliasTarget->isUnion()); }
+    bool isEnum() const { return kind == TypeKind::Enum || (kind == TypeKind::Alias && aliasTarget && aliasTarget->isEnum()); }
+    bool isGenericParam() const { return kind == TypeKind::GenericParam || (kind == TypeKind::Alias && aliasTarget && aliasTarget->isGenericParam()); }
+    bool isFunction() const { return kind == TypeKind::Function || (kind == TypeKind::Alias && aliasTarget && aliasTarget->isFunction()); }
+    bool isClosure() const { return kind == TypeKind::Closure || (kind == TypeKind::Alias && aliasTarget && aliasTarget->isClosure()); }
+    bool isTuple() const { return kind == TypeKind::Tuple || (kind == TypeKind::Alias && aliasTarget && aliasTarget->isTuple()); }
+    bool isUnknown() const { return kind == TypeKind::Unknown || (kind == TypeKind::Alias && aliasTarget && aliasTarget->isUnknown()); }
 
+    TypePtr underlyingType() const;
     std::string toString() const;
     bool equals(const TypePtr& other) const;
 
