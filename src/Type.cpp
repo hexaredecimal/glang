@@ -76,6 +76,12 @@ TypePtr Type::makeTuple(std::vector<TypePtr> elementTypes) {
     return t;
 }
 
+TypePtr Type::makeAlias(const std::string& aliasName, TypePtr target) {
+    auto t = std::make_shared<Type>(TypeKind::Alias, aliasName);
+    t->aliasTarget = target;
+    return t;
+}
+
 TypePtr Type::makeUnknown() {
     return std::make_shared<Type>(TypeKind::Unknown, "auto");
 }
@@ -84,8 +90,24 @@ TypePtr Type::makeError() {
     return std::make_shared<Type>(TypeKind::Error, "<type-error>");
 }
 
+TypePtr Type::underlyingType() const {
+    const Type* current = this;
+    while (current && current->kind == TypeKind::Alias && current->aliasTarget) {
+        current = current->aliasTarget.get();
+    }
+    if (!current) return nullptr;
+    return std::make_shared<Type>(*current);
+}
+
 std::string Type::toString() const {
     if (!this) return "unknown";
+    // If alias, prefer to show alias name with underlying type for clarity
+    if (kind == TypeKind::Alias && aliasTarget) {
+        std::string base = aliasTarget->toString();
+        if (isConst) return std::string("const ") + name;
+        return name ;
+    }
+
     std::string res;
     if (isConst) res += "const ";
 
@@ -148,6 +170,9 @@ std::string Type::toString() const {
             res += ")";
             break;
         }
+        default:
+            res += name;
+            break;
     }
     return res;
 }
@@ -155,6 +180,9 @@ std::string Type::toString() const {
 bool Type::equals(const TypePtr& other) const {
     if (!this && !other) return true;
     if (!this || !other) return false;
+    // Unwrap aliases for equality checks
+    if (kind == TypeKind::Alias && aliasTarget) return aliasTarget->equals(other);
+    if (other->kind == TypeKind::Alias && other->aliasTarget) return equals(other->aliasTarget);
     if (kind != other->kind) return false;
 
     if (kind == TypeKind::Primitive || kind == TypeKind::GenericParam || kind == TypeKind::Enum) {
@@ -205,61 +233,77 @@ bool Type::equals(const TypePtr& other) const {
     return true;
 }
 
-TypePtr Type::substitute(const std::map<std::string, TypePtr>& typeBindings) const {
-    if (!this) return nullptr;
-    if (kind == TypeKind::GenericParam) {
-        auto it = typeBindings.find(name);
-        if (it != typeBindings.end() && it->second) {
-            return it->second;
-        }
+TypePtr Type::substitute(
+    const std::map<std::string, TypePtr>& typeBindings) const {
+  if (!this) return nullptr;
+
+  if (kind == TypeKind::GenericParam) {
+    auto it = typeBindings.find(name);
+    if (it != typeBindings.end() && it->second) {
+      return it->second;
     }
-    if (kind == TypeKind::Pointer) {
-        auto subBase = pointerBase ? pointerBase->substitute(typeBindings) : nullptr;
-        return makePointer(subBase, isConst);
+  }
+  if (kind == TypeKind::Pointer) {
+    auto subBase =
+        pointerBase ? pointerBase->substitute(typeBindings) : nullptr;
+    return makePointer(subBase, isConst);
+  }
+  if (kind == TypeKind::Array) {
+    auto subElem =
+        elementType ? elementType->substitute(typeBindings) : nullptr;
+    return makeArray(subElem, arraySize);
+  }
+  if (kind == TypeKind::Slice) {
+    auto subElem =
+        elementType ? elementType->substitute(typeBindings) : nullptr;
+    return makeSlice(subElem);
+  }
+  if (kind == TypeKind::HashMap) {
+    auto subKey = keyType ? keyType->substitute(typeBindings) : nullptr;
+    auto subVal = elementType ? elementType->substitute(typeBindings) : nullptr;
+    return makeHashMap(subKey, subVal);
+  }
+  if (kind == TypeKind::Struct || kind == TypeKind::Union) {
+    std::vector<TypePtr> newArgs;
+    for (const auto& arg : typeArgs) {
+      newArgs.push_back(arg ? arg->substitute(typeBindings) : nullptr);
     }
-    if (kind == TypeKind::Array) {
-        auto subElem = elementType ? elementType->substitute(typeBindings) : nullptr;
-        return makeArray(subElem, arraySize);
+    auto res = (kind == TypeKind::Struct) ? makeStruct(name, newArgs)
+                                          : makeUnion(name, newArgs);
+    res->fields = fields;  // copy layout
+    return res;
+  }
+  if (kind == TypeKind::Function || kind == TypeKind::Closure) {
+    std::vector<TypePtr> newParams;
+    for (const auto& p : paramTypes) {
+      newParams.push_back(p ? p->substitute(typeBindings) : nullptr);
     }
-    if (kind == TypeKind::Slice) {
-        auto subElem = elementType ? elementType->substitute(typeBindings) : nullptr;
-        return makeSlice(subElem);
+    auto newRet = returnType ? returnType->substitute(typeBindings) : nullptr;
+    return (kind == TypeKind::Function) ? makeFunction(newParams, newRet)
+                                        : makeClosure(newParams, newRet);
+  }
+  if (kind == TypeKind::Tuple) {
+    std::vector<TypePtr> newElems;
+    for (const auto& e : tupleElementTypes) {
+      newElems.push_back(e ? e->substitute(typeBindings) : nullptr);
     }
-    if (kind == TypeKind::HashMap) {
-        auto subKey = keyType ? keyType->substitute(typeBindings) : nullptr;
-        auto subVal = elementType ? elementType->substitute(typeBindings) : nullptr;
-        return makeHashMap(subKey, subVal);
-    }
-    if (kind == TypeKind::Struct || kind == TypeKind::Union) {
-        std::vector<TypePtr> newArgs;
-        for (const auto& arg : typeArgs) {
-            newArgs.push_back(arg ? arg->substitute(typeBindings) : nullptr);
-        }
-        auto res = (kind == TypeKind::Struct) ? makeStruct(name, newArgs) : makeUnion(name, newArgs);
-        res->fields = fields; // copy layout
-        return res;
-    }
-    if (kind == TypeKind::Function || kind == TypeKind::Closure) {
-        std::vector<TypePtr> newParams;
-        for (const auto& p : paramTypes) {
-            newParams.push_back(p ? p->substitute(typeBindings) : nullptr);
-        }
-        auto newRet = returnType ? returnType->substitute(typeBindings) : nullptr;
-        return (kind == TypeKind::Function) ? makeFunction(newParams, newRet) : makeClosure(newParams, newRet);
-    }
-    if (kind == TypeKind::Tuple) {
-        std::vector<TypePtr> newElems;
-        for (const auto& e : tupleElementTypes) {
-            newElems.push_back(e ? e->substitute(typeBindings) : nullptr);
-        }
-        return makeTuple(newElems);
-    }
-    return std::make_shared<Type>(*this);
+    return makeTuple(newElems);
+  }
+  if (kind == TypeKind::Alias) {
+    TypePtr subTarget =
+        aliasTarget ? aliasTarget->substitute(typeBindings) : nullptr;
+    auto res = makeAlias(name, subTarget);
+    res->isConst = isConst;
+    return res;
+  }
+  return std::make_shared<Type>(*this);
 }
 
 std::string mangleType(TypePtr type) {
     if (!type) return "v";
     switch (type->kind) {
+        case TypeKind::Alias:
+            return mangleType(type->aliasTarget);
         case TypeKind::Primitive: {
             if (type->name == "int") return "i";
             if (type->name == "uint") return "u";
