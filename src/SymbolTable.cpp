@@ -82,7 +82,7 @@ Symbol* SymbolTable::lookupVar(const std::string& name) {
 }
 
 Symbol* SymbolTable::lookupType(const std::string& name) {
-    return m_globalScope->lookup(name);
+    return m_currentScope->lookup(name);
 }
 
 std::vector<Symbol*> SymbolTable::lookupFunctions(const std::string& name) {
