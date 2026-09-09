@@ -38,6 +38,10 @@ std::string CodeGen::sanitizeIdentifier(const std::string& name) {
 std::string CodeGen::toILType(TypePtr type) {
     if (!type) return "object";
 
+    if (type->kind == TypeKind::Alias && type->aliasTarget) {
+        return toILType(type->aliasTarget);
+    }
+
     if (type->isPrimitive()) {
         std::string n = type->name;
         if (n == "int" || n == "int32") return "int32";
