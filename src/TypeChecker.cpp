@@ -9,6 +9,10 @@ namespace Glang {
 static TypeASTPtr makeTypeASTFromType(TypePtr type, const Location& loc) {
     if (!type) return std::make_shared<TypeASTNode>(loc, "void");
 
+    if (type->kind == TypeKind::Alias && type->aliasTarget) {
+        return makeTypeASTFromType(type->aliasTarget, loc);
+    }
+
     auto node = std::make_shared<TypeASTNode>(loc, type->name);
     node->isConst = type->isConst;
 
@@ -669,6 +673,8 @@ TypeCheckResult TypeChecker::check(std::shared_ptr<ProgramAST> program) {
 }
 
 static bool isIntegerType(TypePtr t) {
+    if (!t) return false;
+    t = t->underlyingType();
     if (!t || !t->isPrimitive()) return false;
     const std::string& n = t->name;
     return n == "int" || n == "uint" || n == "short" || n == "ushort" ||
@@ -676,16 +682,16 @@ static bool isIntegerType(TypePtr t) {
 }
 
 static bool isFloatType(TypePtr t) {
+    if (!t) return false;
+    t = t->underlyingType();
     if (!t || !t->isPrimitive()) return false;
     const std::string& n = t->name;
     return n == "float" || n == "double";
 }
 
 static bool isVoidPointerType(TypePtr t) {
-    return t && t->isPointer() && t->pointerBase && t->pointerBase->isVoid();
-}
-
-static bool isVoidPointerTarget(TypePtr t) {
+    if (!t) return false;
+    t = t->underlyingType();
     return t && t->isPointer() && t->pointerBase && t->pointerBase->isVoid();
 }
 
@@ -783,11 +789,11 @@ static bool isVariadicArgAssignable(TypePtr src, TypePtr target) {
     if (src->kind == TypeKind::Error || target->kind == TypeKind::Error) return true;
     if (target->kind == TypeKind::Unknown || src->kind == TypeKind::Unknown) return true;
 
-    if (isVoidPointerTarget(target)) {
+    TypePtr effTarget = target->underlyingType();
+    if (effTarget && effTarget->isPointer() && effTarget->pointerBase && effTarget->pointerBase->isVoid()) {
         return true;
     }
 
-    if (target->isPointer() && src->isPrimitive()) return true;
     if ((target->isArray() || target->isSlice()) && (src->isArray() || src->isSlice())) {
         if (target->elementType && src->elementType) {
             return isVariadicArgAssignable(src->elementType, target->elementType);
@@ -843,6 +849,11 @@ void TypeChecker::checkDeclaration(DeclPtr decl) {
         }
 
         TypePtr expectedRet = resolveTypeAST(fDecl->returnTypeAst);
+        fDecl->returnTypeAst = makeTypeASTFromType(expectedRet, fDecl->loc);
+        for (size_t i = 0; i < fDecl->parameters.size(); ++i) {
+            fDecl->parameters[i].typeAst = makeTypeASTFromType(pTypes[i], fDecl->loc);
+        }
+
         TypePtr oldRet = m_currentReturnType;
         bool oldHasReturn = m_hasReturnStmt;
         m_currentReturnType = expectedRet;
@@ -1136,6 +1147,8 @@ TypePtr TypeChecker::checkExpression(ExprPtr expr) {
 }
 
 static bool isNumericPrimitive(TypePtr t) {
+    if (!t) return false;
+    t = t->underlyingType();
     if (!t || !t->isPrimitive()) return false;
     const std::string& n = t->name;
     return n == "int" || n == "uint" || n == "short" || n == "ushort" ||
@@ -1144,6 +1157,8 @@ static bool isNumericPrimitive(TypePtr t) {
 }
 
 static bool isIntegerPrimitive(TypePtr t) {
+    if (!t) return false;
+    t = t->underlyingType();
     if (!t || !t->isPrimitive()) return false;
     const std::string& n = t->name;
     return n == "int" || n == "uint" || n == "short" || n == "ushort" ||
@@ -1379,7 +1394,100 @@ bool TypeChecker::deduceTemplateArgs(TypePtr paramType, TypePtr argType, std::ma
     return true;
 }
 
+static TypePtr getVariadicExpectedParamType(bool isVariadic, size_t argIndex, size_t fixedArgCount,
+                                            TypePtr variadicTarget, const std::vector<TypePtr>& argTypes,
+                                            size_t paramTypeCount) {
+    if (!isVariadic || argIndex < fixedArgCount || !variadicTarget) {
+        return nullptr;
+    }
+    if (argIndex == fixedArgCount && argTypes.size() == paramTypeCount && argTypes[argIndex] &&
+        (argTypes[argIndex]->isArray() || argTypes[argIndex]->isSlice())) {
+        return variadicTarget;
+    }
+    if (variadicTarget->isArray() || variadicTarget->isSlice()) {
+        return variadicTarget->elementType;
+    }
+    return variadicTarget;
+}
+
 TypePtr TypeChecker::checkCallExpr(std::shared_ptr<CallExprAST> expr) {
+    auto resolveMatchedReturnType = [&](Symbol* matchedFn, const std::map<std::string, TypePtr>& bindings) -> TypePtr {
+        if (matchedFn && matchedFn->funcAST) {
+            m_symbolTable.enterScope();
+            for (const auto& tp : matchedFn->funcAST->typeParams) {
+                auto it = bindings.find(tp);
+                if (it != bindings.end() && it->second) m_symbolTable.defineType(tp, it->second);
+                else m_symbolTable.defineType(tp, Type::makeGenericParam(tp));
+            }
+            TypePtr ret = matchedFn->funcAST->returnTypeAst
+                ? resolveTypeAST(matchedFn->funcAST->returnTypeAst)
+                : Type::makePrimitive("void");
+            m_symbolTable.exitScope();
+            return ret ? ret : Type::makePrimitive("void");
+        }
+        if (matchedFn && matchedFn->type && matchedFn->type->returnType) {
+            return matchedFn->type->returnType->substitute(bindings);
+        }
+        return Type::makePrimitive("void");
+    };
+
+    auto applyMatchedFunction = [&](Symbol* matchedFn, const std::map<std::string, TypePtr>& bindings) -> TypePtr {
+        if (!matchedFn) return Type::makeError();
+
+        if (!matchedFn->mangledName.empty()) {
+            expr->targetMangledName = matchedFn->mangledName;
+        }
+        if (matchedFn->funcAST) {
+            std::string instMangled = instantiateFunction(matchedFn->funcAST, bindings, expr->loc);
+            if (!instMangled.empty()) {
+                expr->targetMangledName = instMangled;
+            }
+        }
+
+        if (matchedFn->funcAST && !matchedFn->funcAST->parameters.empty() &&
+            matchedFn->funcAST->parameters.back().isVariadic) {
+            size_t fixedArgCount = matchedFn->funcAST->parameters.size() - 1;
+            bool explicitVariadicArray = expr->arguments.size() == matchedFn->type->paramTypes.size() &&
+                !expr->arguments.empty() &&
+                (std::dynamic_pointer_cast<ArrayLiteralExprAST>(expr->arguments.back()) ||
+                 (expr->arguments.back()->inferredType &&
+                  (expr->arguments.back()->inferredType->isArray() ||
+                   expr->arguments.back()->inferredType->isSlice())));
+
+            if (expr->arguments.size() > fixedArgCount && !explicitVariadicArray) {
+                std::vector<ExprPtr> packedArgs;
+                packedArgs.reserve(fixedArgCount + 1);
+                for (size_t i = 0; i < fixedArgCount; ++i) {
+                    packedArgs.push_back(expr->arguments[i]);
+                }
+                std::vector<ExprPtr> restArgs(expr->arguments.begin() + static_cast<std::ptrdiff_t>(fixedArgCount),
+                                              expr->arguments.end());
+                auto varArray = std::make_shared<ArrayLiteralExprAST>(expr->loc, restArgs);
+
+                TypePtr variadicTarget = matchedFn->type && !matchedFn->type->paramTypes.empty()
+                    ? matchedFn->type->paramTypes.back()->substitute(bindings)
+                    : nullptr;
+                TypePtr elemType = variadicTarget && (variadicTarget->isArray() || variadicTarget->isSlice())
+                    ? variadicTarget->elementType
+                    : variadicTarget;
+                if (!elemType) elemType = Type::makeUnknown();
+
+                varArray->inferredType = checkArrayLiteralExpr(varArray, Type::makeSlice(elemType));
+                packedArgs.push_back(varArray);
+                expr->arguments = packedArgs;
+            }
+        }
+
+        expr->targetParamTypes = matchedFn->type && !matchedFn->type->paramTypes.empty()
+            ? matchedFn->type->paramTypes
+            : std::vector<TypePtr>{};
+        for (auto& p : expr->targetParamTypes) {
+            p = p ? p->substitute(bindings) : nullptr;
+        }
+
+        return resolveMatchedReturnType(matchedFn, bindings);
+    };
+
     // Local helper: resolve best overload for a set of candidate functions
     auto findBestOverload = [&](const std::vector<Symbol*>& funcs) -> std::pair<Symbol*, std::map<std::string, TypePtr>> {
         Symbol* matchedFn = nullptr;
@@ -1427,13 +1535,8 @@ TypePtr TypeChecker::checkCallExpr(std::shared_ptr<CallExprAST> expr) {
                 for (size_t i = 0; i < argTypes.size(); ++i) {
                     TypePtr expectedP = nullptr;
                     if (isVariadic && i >= fixedArgCount && !fType->paramTypes.empty()) {
-                        TypePtr variadicTarget = fType->paramTypes.back();
-                        if (i == fixedArgCount && argTypes.size() == fType->paramTypes.size() &&
-                            argTypes[i] && (argTypes[i]->isArray() || argTypes[i]->isSlice())) {
-                            expectedP = variadicTarget;
-                        } else {
-                            expectedP = variadicTarget && (variadicTarget->isArray() || variadicTarget->isSlice()) ? variadicTarget->elementType : variadicTarget;
-                        }
+                        expectedP = getVariadicExpectedParamType(isVariadic, i, fixedArgCount,
+                            fType->paramTypes.back(), argTypes, fType->paramTypes.size());
                     } else if (i < fType->paramTypes.size()) {
                         expectedP = fType->paramTypes[i];
                     }
@@ -1478,34 +1581,8 @@ TypePtr TypeChecker::checkCallExpr(std::shared_ptr<CallExprAST> expr) {
         // Try to find best overload and apply it (reuse direct-call matching semantics)
         auto [matchedFn, matchedBindings] = findBestOverload(funcs);
         if (matchedFn) {
-            if (!matchedFn->mangledName.empty()) expr->targetMangledName = matchedFn->mangledName;
-            if (matchedFn->funcAST) {
-                std::string instMangled = instantiateFunction(matchedFn->funcAST, matchedBindings, expr->loc);
-                if (!instMangled.empty()) expr->targetMangledName = instMangled;
-            }
             expr->callee = std::make_shared<IdentifierExprAST>(expr->loc, matchedFn->name);
-            expr->targetParamTypes = matchedFn->type && !matchedFn->type->paramTypes.empty()
-                ? matchedFn->type->paramTypes
-                : std::vector<TypePtr>{};
-            for (auto& p : expr->targetParamTypes) p = p ? p->substitute(matchedBindings) : nullptr;
-            // Resolve return type from the function AST when available to avoid
-            // stale/corrupted types stored in the symbol entry. Temporarily
-            // bind generic params in the symbol table so resolveTypeAST can
-            // look them up.
-            TypePtr ret = nullptr;
-            if (matchedFn->funcAST) {
-                m_symbolTable.enterScope();
-                for (const auto& tp : matchedFn->funcAST->typeParams) {
-                    auto it = matchedBindings.find(tp);
-                    if (it != matchedBindings.end() && it->second) m_symbolTable.defineType(tp, it->second);
-                    else m_symbolTable.defineType(tp, Type::makeGenericParam(tp));
-                }
-                ret = matchedFn->funcAST->returnTypeAst ? resolveTypeAST(matchedFn->funcAST->returnTypeAst) : Type::makePrimitive("void");
-                m_symbolTable.exitScope();
-            } else {
-                ret = (matchedFn && matchedFn->type && matchedFn->type->returnType) ? matchedFn->type->returnType->substitute(matchedBindings) : Type::makePrimitive("void");
-            }
-            return ret ? ret : Type::makePrimitive("void");
+            return applyMatchedFunction(matchedFn, matchedBindings);
         }
 
         // Fallthrough: mimic previous behavior for better diagnostics
