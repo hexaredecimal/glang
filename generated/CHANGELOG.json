@@ -2,28 +2,93 @@
   "updates" : [
     {
       "date": "27-07-2026",
-      "title": "Examples data",
-      "description": "Generated json data out of the examples"
+      "title": "",
+      "description": "Examples data: Generated json data out of the examples"
     },
     {
       "date": "27-07-2026",
-      "title": "Showcase",
-      "description": "Created a couple of examples. Simple stuff"
+      "title": "",
+      "description": "Showcase: Created a couple of examples. Simple stuff"
     },
     {
       "date": "27-07-2026",
-      "title": "First changelog",
-      "description": "Generated the first CHANGELOG.json"
+      "title": "",
+      "description": "First changelog: Generated the first CHANGELOG.json"
     },
     {
       "date": "27-07-2026",
-      "title": "Quick changelog tool",
-      "description": "Added c++ sources for the changelog tool"
+      "title": "",
+      "description": "Quick changelog tool: Added c++ sources for the changelog tool"
     },
     {
       "date": "27-07-2026",
-      "title": "Glang gets a git repo",
-      "description": "Created git repo for glang"
+      "title": "",
+      "description": "Glang gets a git repo: Created git repo for glang"
+    },
+    {
+      "date": "04-09-2026",
+      "title": "",
+      "description": "Finalized the LSP and broke the VS code extension"
+    },
+    {
+      "date": "05-09-2026",
+      "title": "",
+      "description": "Fixed the VS code extension"
+    },
+    {
+      "date": "05-09-2026",
+      "title": "",
+      "description": "Deleted the old github repo."
+    },
+    {
+      "date": "05-09-2026",
+      "title": "",
+      "description": "Recreated a new repo for glang."
+    },
+    {
+      "date": "05-09-2026",
+      "title": "",
+      "description": "Re-commit all sources including the entire compiler."
+    },
+    {
+      "date": "05-09-2026",
+      "title": "",
+      "description": "Added GPL-v3 as the license"
+    },
+    {
+      "date": "06-09-2026",
+      "title": "",
+      "description": "Implemented variadic args"
+    },
+    {
+      "date": "05-09-2026",
+      "title": "",
+      "description": "Compiled the first ever .exe from the compiler, prints and does nothing"
+    },
+    {
+      "date": "08-09-2026",
+      "title": "",
+      "description": "Fixed a type alias bug"
+    },
+    {
+      "date": "08-09-2026",
+      "title": "",
+      "description": "Added strict checks to type kinds"
+    },
+    {
+      "date": "11-09-2026",
+      "title": "",
+      "description": "Code maintainance. Reformateted the code base and removed redundant functions"
+    },
+    {
+      "date": "11-09-2026",
+      "title": "",
+      "description": "Re-implemented the test runner "
+    },
+    {
+      "date": "11-09-2026",
+      "title": "",
+      "description": "Improve the build system to allow building specific parts of the project. "
     }
   ]
 }
