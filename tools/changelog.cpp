@@ -66,7 +66,7 @@ bool parseChange(std::istream& in, Change& change) {
 int main(int argc, char**argv) {
 
     if (argc == 1) {
-      std::cout << "Usage: changelog CHANGELOG > file.json" << std::endl;
+      std::cout << "Usage: changelog CHANGELOG" << std::endl;
       return 1;
     }
 
@@ -86,28 +86,34 @@ int main(int argc, char**argv) {
         v.push_back(change);
     }
 
+    std::ofstream outSS("generated/CHANGELOG.json");
 
-    std::cout << "{" << std::endl;
-    std::cout << "  \"updates\" : [" << std::endl;
+    if (!outSS.is_open()) {
+      std::cout << "Error: Failed to open output stream" << std::endl;
+      return 1;
+    }
+
+    outSS << "{\n";
+    outSS << "  \"updates\" : [\n";
 
     int count = v.size();
     for (int i = 0; i < count; ++i) {
       Change c = v[i];
-      std::cout << "    {" << std::endl;
+      outSS << "    {\n";
       {
-        std::cout << "      \"date\": \"" << c.date << "\"," << std::endl;
-        std::cout << "      \"title\": \"" << c.title << "\"," << std::endl;
-        std::cout << "      \"description\": \"" << c.message << "\"" << std::endl;
+        outSS << "      \"date\": \"" << c.date << "\",\n";
+        outSS << "      \"title\": \"" << c.title << "\",\n";
+        outSS << "      \"description\": \"" << c.message << "\"\n";
       }
-      std::cout << "    }";
+      outSS << "    }";
 
       if (i < count - 1)
-        std::cout << "," << std::endl;
-      else std::cout << std::endl;
-
+        outSS << ",\n";
+      else
+        outSS << "\n";
     }
 
-    std::cout << "  ]" << std::endl;
-    std::cout << "}" << std::endl;
+    outSS << "  ]\n";
+    outSS << "}\n";
     return 0;
 }

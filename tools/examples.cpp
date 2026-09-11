@@ -57,8 +57,14 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    std::cout << "{\n";
-    std::cout << "  \"files\": [\n";
+    std::ofstream outSS("generated/EXAMPLES.json");
+    if (!outSS.is_open()) {
+      std::cout << "Error: Failed to open file" << std::endl;
+      return 1;
+    }
+
+    outSS << "{\n";
+    outSS << "  \"files\": [\n";
 
     bool first = true;
 
@@ -69,22 +75,23 @@ int main(int argc, char** argv) {
         if (entry.path().extension() != ".g")
             continue;
 
-        if (!first)
-            std::cout << ",\n";
+        if (!first) outSS << ",\n";
 
         first = false;
 
         std::string code = read_file(entry.path());
 
-        std::cout << "    {\n";
-        std::cout << "      \"name\": \"" << escape_json(entry.path().filename().string()) << "\",\n";
-        std::cout << "      \"code\": \"" << escape_json(code) << "\"\n";
-        std::cout << "    }";
+        outSS << "    {\n";
+        outSS << "      \"name\": \""
+              << escape_json(entry.path().filename().string()) << "\",\n";
+        outSS << "      \"code\": \"" << escape_json(code) << "\"\n";
+        outSS << "    }";
     }
 
-    std::cout << "\n";
-    std::cout << "  ]\n";
-    std::cout << "}\n";
+    outSS << "\n";
+    outSS << "  ]\n";
+    outSS << "}\n";
 
+    std::cout << "Wrote output to: generated/examples.json" << std::endl;
     return 0;
 }
