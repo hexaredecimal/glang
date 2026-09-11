@@ -129,8 +129,8 @@ void run(args::Subparser& parser) {
 
 
 int main(int argc, char** argv) {
-  args::ArgumentParser parser("glang compiler",
-                              "Compiler frontend and language server.");
+  args::ArgumentParser parser(
+      "glang cli", "The command line interface for the glang compiler");
 
   args::Group commands(parser, "commands");
 
