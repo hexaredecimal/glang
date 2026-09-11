@@ -29,6 +29,7 @@ private:
     Token lexNumber();
     Token lexString();
     Token lexChar();
+    Token lexOperator();
 
     std::string m_filename;
     std::string m_source;
