@@ -11,6 +11,9 @@
 #include "compiler/Parser.hpp"
 #include "compiler/TypeChecker.hpp"
 
+#define NOB_IMPLEMENTATION
+#include "../nob.h"
+
 using namespace Glang;
 
 void write_il(std::string& path, std::string& ilcode) {
@@ -23,7 +26,8 @@ void write_il(std::string& path, std::string& ilcode) {
   outFile << ilcode;
 }
 
-void compile(std::string& filePath, std::string targetOutPath, bool print_ir) {
+void compile(std::string& filePath, std::string targetOutPath, bool write_ir,
+             bool print_ir) {
   std::string code = "";
   std::ifstream file(filePath);
   if (!file.is_open()) {
@@ -53,8 +57,6 @@ void compile(std::string& filePath, std::string targetOutPath, bool print_ir) {
     ilCode = codeGen.generate(ast);
     if (codeGen.hasErrors()) {
       hasErrors = true;
-    } else if (!ilCode.empty()) {
-      write_il(targetOutPath, ilCode);
     }
   }
 
@@ -78,8 +80,31 @@ void compile(std::string& filePath, std::string targetOutPath, bool print_ir) {
     }
   }
 
-  if (!ilCode.empty() && print_ir) {
+  if (ilCode.empty()) {
+    return;
+  }
+
+  if (write_ir && !print_ir) {
+    write_il(targetOutPath, ilCode);
+  } else if (write_ir && print_ir) {
     std::cout << ilCode;
+  } else {
+    // TODO: Build the exe on all platforms
+    std::string ilPath = targetOutPath + ".il";
+    write_il(ilPath, ilCode);
+    Nob_Cmd cmd = {0};
+
+    nob_cmd_append(&cmd, "ilasm", ilPath.c_str(), "/output",
+                   targetOutPath.c_str());
+
+    if (!nob_cmd_run(&cmd)) {
+      std::cout << "Error: Assembly error: Failed to create executable"
+                << std::endl;
+      nob_delete_file(ilPath.c_str());
+      return;
+    }
+
+    nob_delete_file(ilPath.c_str());
   }
 }
 
@@ -91,16 +116,18 @@ void build_file(args::Subparser& parser) {
   args::ValueFlag<std::string> outfile(parser, "output",
                                        "Output file name or path", {"o"});
 
+  args::Flag _stdout(parser, "stdout", "Write to stdout", {"so"});
   parser.Parse();
 
   if (file) {
     std::string& file_path = args::get(file);
 
     if (outfile)
-      compile(file_path, args::get(outfile), ir.Get());
-    else
-      compile(file_path, "output.il", ir.Get());
-
+      compile(file_path, args::get(outfile), ir.Get(), _stdout.Get());
+    else {
+      compile(file_path, ir.Get() ? "output.il" : "output.exe", ir.Get(),
+              _stdout.Get());
+    }
   } else
     std::cout << "TODO: Build project";
 }
