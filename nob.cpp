@@ -89,8 +89,8 @@ int main(int argc, char **argv)
 {
     NOB_GO_REBUILD_URSELF(argc, argv);
 
-    args::ArgumentParser parser("glang compiler",
-                                "Compiler frontend and language server.");
+    args::ArgumentParser parser("Glang Build System",
+                                "The build system for the glang compiler");
 
     args::Group commands(parser, "commands");
 
