@@ -48,14 +48,62 @@ static void build_target(const char* output, const char* main_source) {
     }
 }
 
+static void simple_build(const char* output, const char* main_source) {
+  const char* home = getenv("HOME");
+  Nob_Cmd cmd = {0};
+
+  nob_cmd_append(&cmd, "g++", "-std=c++20", "-g", "-O0", "-I./include",
+                 "-IC:\\msys64\\home\\client\\.local\\include");
+
+  nob_cmd_append(&cmd, main_source);
+
+  nob_cmd_append(&cmd, "-o", output);
+
+  nob_cmd_append(&cmd, "-LC:\\msys64\\home\\client\\.local\\lib");
+
+#ifdef _WIN32
+  nob_cmd_append(&cmd, "-D_WIN32_WINNT=0x0A00", "-DWINVER=0x0A00", "-lws2_32",
+                 "-lcrypt32");
+#else
+  nob_cmd_append(&cmd, "-pthread");
+#endif
+  nob_cmd_append(&cmd, "-llsp");
+
+  if (!nob_cmd_run_sync_and_reset(&cmd)) {
+    nob_log(NOB_ERROR, "Failed to build %s", output);
+    exit(1);
+  }
+}
+
 void build_config(args::Subparser& parser) {
   args::Flag glang(parser, "glang", "Build glang compiler", {"g", "glang"});
   args::Flag test_runner(parser, "test_runner", "Build the test runner",
                          {"t", "tests"});
 
+  args::Flag changelog(parser, "changelog", "Build build the CHNAGELOG parser",
+                       {"c", "changelog"});
+  args::Flag examples(parser, "examples", "Build examples serializer",
+                      {"e", "examples"});
+
   parser.Parse();
 
   if (!nob_mkdir_if_not_exists("build")) {
+    return;
+  }
+
+  if (changelog || examples) {
+    if (!nob_mkdir_if_not_exists("tools")) {
+      return;
+    }
+  }
+
+  if (changelog) {
+    simple_build("build/changelog", "tools/changelog.cpp");
+    return;
+  }
+
+  if (examples) {
+    simple_build("build/examples", "tools/examples.cpp");
     return;
   }
 
