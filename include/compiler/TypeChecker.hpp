@@ -39,27 +39,22 @@ private:
 
     TypePtr resolveTypeAST(TypeASTPtr ast);
 
-    // Note:  Pass 1, 2, 2b
     void processImports(std::shared_ptr<ProgramAST> program);
     void registerTypes(std::shared_ptr<ProgramAST> program);
     void registerFunctions(std::shared_ptr<ProgramAST> program);
     void registerTopLevelVariables(std::shared_ptr<ProgramAST> program);
 
-    // Note:  Pass 3
     void checkDeclaration(DeclPtr decl);
     void checkStatement(StmtPtr stmt);
     TypePtr checkExpression(ExprPtr expr);
 
-    // Note:  Statement checkers
     void checkWhileStmt(std::shared_ptr<WhileStmtAST> stmt);
     void checkDoWhileStmt(std::shared_ptr<DoWhileStmtAST> stmt);
     void checkForStmt(std::shared_ptr<ForStmtAST> stmt);
 
-    // Note:  Instantiation helpers
     void instantiateType(TypePtr type, const Location& loc);
     std::string instantiateFunction(std::shared_ptr<FunctionDeclAST> fDecl, const std::map<std::string, TypePtr>& bindings, const Location& loc);
 
-    // Note:  Dedicated Expr type checkers
     TypePtr checkArrayLiteralExpr(std::shared_ptr<ArrayLiteralExprAST> expr, TypePtr expectedType = nullptr);
     TypePtr checkMapLiteralExpr(std::shared_ptr<MapLiteralExprAST> expr, TypePtr expectedType = nullptr);
     TypePtr checkIndexExpr(std::shared_ptr<IndexExprAST> expr);
@@ -67,6 +62,70 @@ private:
     TypePtr checkBinaryExpr(std::shared_ptr<BinaryExprAST> expr);
     TypePtr checkUnaryExpr(std::shared_ptr<UnaryExprAST> expr);
     TypePtr checkCallExpr(std::shared_ptr<CallExprAST> expr);
+    TypePtr checkUserLiteralCall(std::shared_ptr<CallExprAST> expr);
+    TypePtr checkMemberAccessCall(std::shared_ptr<CallExprAST> expr,
+                                  std::shared_ptr<MemberAccessExprAST> memAccess);
+    TypePtr checkIdentifierCall(std::shared_ptr<CallExprAST> expr,
+                                std::shared_ptr<IdentifierExprAST> ident);
+    TypePtr checkCallableExprCall(std::shared_ptr<CallExprAST> expr);
+
+    struct FunctionOverloadMatch {
+        Symbol* function = nullptr;
+        std::map<std::string, TypePtr> bindings;
+    };
+
+    struct UfcsOverloadMatch {
+        Symbol* function = nullptr;
+        std::map<std::string, TypePtr> bindings;
+        std::vector<ExprPtr> fullArguments;
+    };
+
+    std::map<std::string, TypePtr> collectExplicitTemplateBindings(
+        std::shared_ptr<CallExprAST> expr,
+        const std::shared_ptr<FunctionDeclAST>& funcAST);
+    bool hasUnboundTemplateParams(
+        const std::shared_ptr<FunctionDeclAST>& funcAST,
+        const std::map<std::string, TypePtr>& bindings);
+
+    FunctionOverloadMatch findBestDirectFunctionOverload(
+        std::shared_ptr<CallExprAST> expr, const std::vector<Symbol*>& funcs);
+    UfcsOverloadMatch findBestUfcsFunctionOverload(
+        std::shared_ptr<CallExprAST> expr, TypePtr objType,
+        const std::vector<Symbol*>& funcs,
+        std::shared_ptr<MemberAccessExprAST> memAccess);
+
+    std::vector<ExprPtr> buildUfcsFullArguments(
+        std::shared_ptr<MemberAccessExprAST> memAccess, TypePtr objType,
+        const std::vector<ExprPtr>& callArgs, TypePtr functionType);
+
+    TypePtr resolveMatchedFunctionReturnType(
+        Symbol* matchedFn, const std::map<std::string, TypePtr>& bindings);
+    void setMatchedFunctionTarget(
+        std::shared_ptr<CallExprAST> expr, Symbol* matchedFn,
+        const std::map<std::string, TypePtr>& bindings);
+    void packVariadicCallArguments(
+        std::shared_ptr<CallExprAST> expr, Symbol* matchedFn,
+        const std::map<std::string, TypePtr>& bindings);
+    void setCallTargetParamTypes(
+        std::shared_ptr<CallExprAST> expr, Symbol* matchedFn,
+        const std::map<std::string, TypePtr>& bindings);
+    TypePtr applyMatchedFunctionCall(
+        std::shared_ptr<CallExprAST> expr, Symbol* matchedFn,
+        const std::map<std::string, TypePtr>& bindings);
+
+    TypePtr finalizeUfcsMatchedCall(
+        std::shared_ptr<CallExprAST> expr, Symbol* matchedFn,
+        const std::map<std::string, TypePtr>& bindings,
+        const std::vector<ExprPtr>& fullArguments);
+
+    void reportDirectCallMismatchErrors(
+        std::shared_ptr<CallExprAST> expr, Symbol* fnSym,
+        const std::string& functionName);
+    void reportUfcsCallMismatchErrors(
+        std::shared_ptr<CallExprAST> expr,
+        std::shared_ptr<MemberAccessExprAST> memAccess,
+        const std::vector<Symbol*>& funcs);
+
     TypePtr checkStaticMethodCallExpr(std::shared_ptr<StaticMethodCallExprAST> expr);
     TypePtr checkMemberAccessExpr(std::shared_ptr<MemberAccessExprAST> expr);
     TypePtr checkStructInitExpr(std::shared_ptr<StructInitExprAST> expr);
@@ -79,7 +138,6 @@ private:
     TypePtr checkTupleLiteralExpr(std::shared_ptr<TupleLiteralExprAST> expr);
     TypePtr checkNullLiteralExpr(std::shared_ptr<NullLiteralExprAST> expr);
 
-    // Note:  Template deduction helper
     bool deduceTemplateArgs(TypePtr paramType, TypePtr argType, std::map<std::string, TypePtr>& bindings);
 
     SymbolTable m_symbolTable;
