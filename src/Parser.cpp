@@ -1509,9 +1509,6 @@ ExprPtr Parser::parseBlockExpression() {
   }
 
   consume(TokenKind::RBrace, "Expected '}' after block expression");
-  if (!yieldValue && lastExpr) {
-    yieldValue = lastExpr;
-  }
   return std::make_shared<BlockExprAST>(loc, stmts, yieldValue);
 }
 
