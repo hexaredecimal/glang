@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <functional>
 #include <sstream>
 
 namespace Glang {
@@ -187,12 +188,21 @@ std::string CodeGen::toILTypeFromAST(TypeASTPtr ast) {
     if (n == "auto") return "int32";
 
     if (!ast->templateArgs.empty()) {
-        std::string sName = ast->name + "<";
-        for (size_t i = 0; i < ast->templateArgs.size(); ++i) {
-            if (i > 0) sName += ", ";
-            sName += ast->templateArgs[i]->name;
-        }
-        sName += ">";
+        std::function<std::string(const TypeASTPtr&)> buildTypeName = [&](const TypeASTPtr& t) -> std::string {
+            if (!t) return "";
+            std::string res = t->name;
+            if (!t->templateArgs.empty()) {
+                res += "<";
+                for (size_t i = 0; i < t->templateArgs.size(); ++i) {
+                    if (i > 0) res += ", ";
+                    res += buildTypeName(t->templateArgs[i]);
+                }
+                res += ">";
+            }
+            if (t->isPointer) res += "*";
+            return res;
+        };
+        std::string sName = buildTypeName(ast);
         return "valuetype " + sanitizeIdentifier(sName);
     }
 
@@ -705,6 +715,14 @@ std::string CodeGen::emitUnaryExpr(std::shared_ptr<UnaryExprAST> expr, ILMethodC
             ss << "    ldloca.s " << idx << "\n";
             return ss.str();
         }
+        std::string innerType = (expr->operand && expr->operand->inferredType)
+                                    ? toILType(expr->operand->inferredType)
+                                    : "int32";
+        int tempIdx = ctx.allocTempLocal(innerType);
+        ss << emitExpr(expr->operand, ctx);
+        ss << "    stloc.s " << tempIdx << "\n";
+        ss << "    ldloca.s " << tempIdx << "\n";
+        return ss.str();
     }
 
     if (expr->op == "*") {
@@ -1036,7 +1054,12 @@ std::string CodeGen::emitStructInitExpr(std::shared_ptr<StructInitExprAST> expr,
             fieldName = "field_" + std::to_string(i);
         }
         fieldName = sanitizeIdentifier(fieldName);
-        std::string fieldType = (expr->fieldInits[i].second->inferredType) ? toILType(expr->fieldInits[i].second->inferredType) : "int32";
+        std::string fieldType = "int32";
+        if (expr->inferredType && expr->inferredType->isStruct() && i < expr->inferredType->fields.size() && expr->inferredType->fields[i].type) {
+            fieldType = toILType(expr->inferredType->fields[i].type);
+        } else if (expr->fieldInits[i].second->inferredType) {
+            fieldType = toILType(expr->fieldInits[i].second->inferredType);
+        }
         ss << "    stfld " << fieldType << " " << structType << "::" << fieldName << "\n";
     }
 
