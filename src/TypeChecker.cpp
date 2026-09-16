@@ -124,7 +124,11 @@ TypePtr TypeChecker::resolveTypeAST(TypeASTPtr ast) {
 
   Symbol* sym = m_symbolTable.lookupType(ast->name);
   if (!sym) {
-    return Type::makeStruct(ast->name);
+    std::vector<TypePtr> resolvedArgs;
+    for (const auto& argAst : ast->templateArgs) {
+      resolvedArgs.push_back(resolveTypeAST(argAst));
+    }
+    return Type::makeStruct(ast->name, resolvedArgs);
   }
 
   if (sym->isTypeAlias && sym->aliasAST) {
@@ -198,6 +202,12 @@ void TypeChecker::instantiateType(TypePtr type, const Location& loc) {
     if (containsGenericParam(arg)) return;
   }
 
+  for (const auto& arg : type->typeArgs) {
+    if (arg && (arg->isStruct() || arg->isUnion()) && !arg->typeArgs.empty()) {
+      instantiateType(arg, loc);
+    }
+  }
+
   std::string key = type->toString();
 
   if (type->isStruct()) {
@@ -211,16 +221,27 @@ void TypeChecker::instantiateType(TypePtr type, const Location& loc) {
         bindings[templateDecl->typeParams[i]] = type->typeArgs[i];
       }
 
+      m_symbolTable.enterScope();
+      for (const auto& tp : templateDecl->typeParams) {
+        auto bIt = bindings.find(tp);
+        if (bIt != bindings.end() && bIt->second) {
+          m_symbolTable.defineType(tp, bIt->second);
+        } else {
+          m_symbolTable.defineType(tp, Type::makeGenericParam(tp));
+        }
+      }
+
       std::vector<Type::Field> realFields;
       for (const auto& f : templateDecl->fields) {
         TypePtr fType = resolveTypeAST(f.typeAst);
-        TypePtr subFType = fType ? fType->substitute(bindings) : nullptr;
-        realFields.push_back({f.name, subFType});
+        realFields.push_back({f.name, fType});
       }
       type->fields = realFields;
 
-      if (m_instantiatedTypeKeys.find(key) != m_instantiatedTypeKeys.end())
+      if (m_instantiatedTypeKeys.find(key) != m_instantiatedTypeKeys.end()) {
+        m_symbolTable.exitScope();
         return;
+      }
       m_instantiatedTypeKeys.insert(key);
 
       m_result.instantiatedTypes.push_back(type);
@@ -228,9 +249,18 @@ void TypeChecker::instantiateType(TypePtr type, const Location& loc) {
       std::vector<StructField> instFields;
       for (const auto& f : templateDecl->fields) {
         TypePtr fType = resolveTypeAST(f.typeAst);
-        TypePtr subFType = fType ? fType->substitute(bindings) : nullptr;
-        instFields.push_back({f.name, makeTypeASTFromType(subFType, loc)});
+        instFields.push_back({f.name, makeTypeASTFromType(fType, loc)});
       }
+      m_symbolTable.exitScope();
+
+      for (const auto& rf : realFields) {
+        TypePtr inner = rf.type;
+        while (inner && inner->isPointer()) inner = inner->pointerBase;
+        if (inner && (inner->isStruct() || inner->isUnion()) && !inner->typeArgs.empty()) {
+          instantiateType(inner, loc);
+        }
+      }
+
       auto instStruct = std::make_shared<StructDeclAST>(
           loc, key, std::vector<std::string>{}, instFields);
       m_result.astNodesToCodeGen.push_back(instStruct);
@@ -246,16 +276,27 @@ void TypeChecker::instantiateType(TypePtr type, const Location& loc) {
         bindings[templateDecl->typeParams[i]] = type->typeArgs[i];
       }
 
+      m_symbolTable.enterScope();
+      for (const auto& tp : templateDecl->typeParams) {
+        auto bIt = bindings.find(tp);
+        if (bIt != bindings.end() && bIt->second) {
+          m_symbolTable.defineType(tp, bIt->second);
+        } else {
+          m_symbolTable.defineType(tp, Type::makeGenericParam(tp));
+        }
+      }
+
       std::vector<Type::Field> realFields;
       for (const auto& f : templateDecl->fields) {
         TypePtr fType = resolveTypeAST(f.typeAst);
-        TypePtr subFType = fType ? fType->substitute(bindings) : nullptr;
-        realFields.push_back({f.name, subFType});
+        realFields.push_back({f.name, fType});
       }
       type->fields = realFields;
 
-      if (m_instantiatedTypeKeys.find(key) != m_instantiatedTypeKeys.end())
+      if (m_instantiatedTypeKeys.find(key) != m_instantiatedTypeKeys.end()) {
+        m_symbolTable.exitScope();
         return;
+      }
       m_instantiatedTypeKeys.insert(key);
 
       m_result.instantiatedTypes.push_back(type);
@@ -263,9 +304,18 @@ void TypeChecker::instantiateType(TypePtr type, const Location& loc) {
       std::vector<StructField> instFields;
       for (const auto& f : templateDecl->fields) {
         TypePtr fType = resolveTypeAST(f.typeAst);
-        TypePtr subFType = fType ? fType->substitute(bindings) : nullptr;
-        instFields.push_back({f.name, makeTypeASTFromType(subFType, loc)});
+        instFields.push_back({f.name, makeTypeASTFromType(fType, loc)});
       }
+      m_symbolTable.exitScope();
+
+      for (const auto& rf : realFields) {
+        TypePtr inner = rf.type;
+        while (inner && inner->isPointer()) inner = inner->pointerBase;
+        if (inner && (inner->isStruct() || inner->isUnion()) && !inner->typeArgs.empty()) {
+          instantiateType(inner, loc);
+        }
+      }
+
       auto instUnion = std::make_shared<UnionDeclAST>(
           loc, key, std::vector<std::string>{}, instFields);
       m_result.astNodesToCodeGen.push_back(instUnion);
@@ -299,6 +349,16 @@ std::string TypeChecker::instantiateFunction(std::shared_ptr<FunctionDeclAST> fD
       first = false;
     }
     key += ">";
+  }
+
+  m_symbolTable.enterScope();
+  for (const auto& tp : fDecl->typeParams) {
+    auto bIt = bindings.find(tp);
+    if (bIt != bindings.end()) {
+      m_symbolTable.defineType(tp, bIt->second);
+    } else {
+      m_symbolTable.defineType(tp, Type::makeGenericParam(tp));
+    }
   }
 
   std::vector<ParamDecl> instParams;
@@ -335,26 +395,15 @@ std::string TypeChecker::instantiateFunction(std::shared_ptr<FunctionDeclAST> fD
       mangleFunctionName(fDecl->name, mangledOwner, pTypes);
 
   if (m_instantiatedFuncKeys.find(key) != m_instantiatedFuncKeys.end()) {
+    m_symbolTable.exitScope();
     return instMangled;
   }
   m_instantiatedFuncKeys.insert(key);
-
-  m_symbolTable.enterScope();
-  for (const auto& tp : fDecl->typeParams) {
-    auto bIt = bindings.find(tp);
-    if (bIt != bindings.end()) {
-      m_symbolTable.defineType(tp, bIt->second);
-    } else {
-      m_symbolTable.defineType(tp, Type::makeGenericParam(tp));
-    }
-  }
 
   TypePtr retType = resolveTypeAST(fDecl->returnTypeAst);
   TypePtr subRetType =
       retType ? retType->substitute(bindings) : Type::makePrimitive("void");
   TypeASTPtr instRetAst = makeTypeASTFromType(subRetType, loc);
-
-  m_symbolTable.exitScope();
 
   auto instFunc = std::make_shared<FunctionDeclAST>(
       loc, fDecl->name, scopedOwner,
@@ -367,6 +416,8 @@ std::string TypeChecker::instantiateFunction(std::shared_ptr<FunctionDeclAST> fD
                                instFunc->inferredType, instFunc, instMangled);
 
   checkDeclaration(instFunc);
+
+  m_symbolTable.exitScope();
 
   m_result.instantiatedFunctions.push_back(instFunc);
   m_result.astNodesToCodeGen.push_back(instFunc);
@@ -844,6 +895,21 @@ static bool isAssignable(TypePtr src, TypePtr target) {
     return true;
   }
 
+  if ((target->isStruct() || target->isUnion()) &&
+      (src->isStruct() || src->isUnion())) {
+    if (target->name == src->name &&
+        target->typeArgs.size() == src->typeArgs.size()) {
+      bool allOk = true;
+      for (size_t i = 0; i < target->typeArgs.size(); ++i) {
+        if (!isAssignable(src->typeArgs[i], target->typeArgs[i])) {
+          allOk = false;
+          break;
+        }
+      }
+      if (allOk) return true;
+    }
+  }
+
   if ((target->isArray() || target->isSlice()) &&
       (src->isArray() || src->isSlice())) {
     if (target->elementType && src->elementType) {
@@ -982,7 +1048,7 @@ void TypeChecker::checkDeclaration(DeclPtr decl) {
       } else {
         bodyType = checkExpression(fDecl->body);
       }
-      fDecl->inferredType = bodyType;
+      fDecl->inferredType = Type::makeFunction(pTypes, expectedRet ? expectedRet : bodyType);
 
       if (fDecl->isShorthand) {
         if (expectedRet && !expectedRet->isGenericParam() &&
@@ -1077,6 +1143,9 @@ void TypeChecker::checkStatement(StmtPtr stmt) {
     }
 
     vStmt->inferredType = declType;
+    if (declType && declType->kind != TypeKind::Error) {
+      vStmt->typeAst = makeTypeASTFromType(declType, vStmt->loc);
+    }
     m_symbolTable.defineVar(vStmt->name, declType, vStmt->isConst,
                             vStmt->isStatic);
 
@@ -1537,6 +1606,14 @@ bool TypeChecker::deduceTemplateArgs(TypePtr paramType, TypePtr argType, std::ma
   if (effParam->isPointer() && effArg->isPointer()) {
     return deduceTemplateArgs(effParam->pointerBase, effArg->pointerBase,
                               bindings);
+  }
+
+  if (effParam->isPointer() && !effArg->isPointer()) {
+    return deduceTemplateArgs(effParam->pointerBase, effArg, bindings);
+  }
+
+  if (!effParam->isPointer() && effArg->isPointer()) {
+    return deduceTemplateArgs(effParam, effArg->pointerBase, bindings);
   }
 
   if ((effParam->isArray() || effParam->isSlice()) &&
@@ -2424,7 +2501,12 @@ TypePtr TypeChecker::checkStructInitExpr(std::shared_ptr<StructInitExprAST> expr
       }
 
       if (fieldTypeAST) {
+        m_symbolTable.enterScope();
+        for (const auto& tp : templateDecl->typeParams) {
+          m_symbolTable.defineType(tp, Type::makeGenericParam(tp));
+        }
         TypePtr declFType = resolveTypeAST(fieldTypeAST);
+        m_symbolTable.exitScope();
         if (declFType) {
           deduceTemplateArgs(declFType, valType, bindings);
         }
@@ -2438,9 +2520,29 @@ TypePtr TypeChecker::checkStructInitExpr(std::shared_ptr<StructInitExprAST> expr
       }
     }
 
+    if (tArgs.size() != templateDecl->typeParams.size() &&
+        m_currentReturnType && m_currentReturnType->name == expr->structType->name &&
+        m_currentReturnType->typeArgs.size() == templateDecl->typeParams.size()) {
+      tArgs = m_currentReturnType->typeArgs;
+    }
+
     if (tArgs.size() == templateDecl->typeParams.size()) {
       stType = Type::makeStruct(expr->structType->name, tArgs);
       instantiateType(stType, expr->loc);
+      expr->structType = makeTypeASTFromType(stType, expr->loc);
+    }
+
+    if (stType && stType->isStruct()) {
+      for (size_t i = 0; i < expr->fieldInits.size() && i < stType->fields.size(); ++i) {
+        TypePtr targetFType = stType->fields[i].type;
+        ExprPtr valExpr = expr->fieldInits[i].second;
+        if (targetFType && targetFType->isPointer() && valExpr &&
+            valExpr->inferredType && !valExpr->inferredType->isPointer()) {
+          auto addrOf = std::make_shared<UnaryExprAST>(valExpr->loc, "&", valExpr);
+          addrOf->inferredType = Type::makePointer(valExpr->inferredType);
+          expr->fieldInits[i].second = addrOf;
+        }
+      }
     }
   } else {
     for (const auto& f : expr->fieldInits) {
@@ -2448,6 +2550,7 @@ TypePtr TypeChecker::checkStructInitExpr(std::shared_ptr<StructInitExprAST> expr
     }
   }
 
+  expr->inferredType = stType;
   return stType;
 }
 
