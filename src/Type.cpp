@@ -270,7 +270,10 @@ TypePtr Type::substitute(
     }
     auto res = (kind == TypeKind::Struct) ? makeStruct(name, newArgs)
                                           : makeUnion(name, newArgs);
-    res->fields = fields;  // copy layout
+    for (const auto& f : fields) {
+      res->fields.push_back(
+          {f.name, f.type ? f.type->substitute(typeBindings) : nullptr});
+    }
     return res;
   }
   if (kind == TypeKind::Function || kind == TypeKind::Closure) {
