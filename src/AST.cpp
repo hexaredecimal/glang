@@ -1,4 +1,5 @@
 #include "compiler/AST.hpp"
+#include <functional>
 
 namespace Glang {
 
@@ -19,10 +20,25 @@ std::string TypeASTNode::toTreeString(int indent) const {
         res += ")";
     }
     if (!templateArgs.empty()) {
+        std::function<std::string(const std::shared_ptr<TypeASTNode>&)> buildName =
+            [&](const std::shared_ptr<TypeASTNode>& t) -> std::string {
+          if (!t) return "";
+          std::string s = t->name;
+          if (!t->templateArgs.empty()) {
+            s += "<";
+            for (size_t i = 0; i < t->templateArgs.size(); ++i) {
+              if (i > 0) s += ", ";
+              s += buildName(t->templateArgs[i]);
+            }
+            s += ">";
+          }
+          if (t->isPointer) s += "*";
+          return s;
+        };
         res += " <";
         for (size_t i = 0; i < templateArgs.size(); ++i) {
             if (i > 0) res += ", ";
-            res += templateArgs[i]->name;
+            res += buildName(templateArgs[i]);
         }
         res += ">";
     }
