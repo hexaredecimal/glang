@@ -49,7 +49,7 @@ void SymbolTable::defineType(const std::string& name, TypePtr type) {
   sym.name = name;
   sym.type = type;
   sym.isType = true;
-  m_globalScope->define(sym);
+  m_currentScope->define(sym);
 }
 
 void SymbolTable::defineTypeAlias(const std::string& name, std::shared_ptr<TypeAliasDeclAST> aliasAST) {
