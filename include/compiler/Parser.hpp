@@ -85,6 +85,7 @@ private:
     std::vector<Token> m_tokens;
     size_t m_current{0};
     std::vector<Error> m_errors;
+    bool m_inSwitchPattern{false};
 };
 
 }  // namespace Glang
