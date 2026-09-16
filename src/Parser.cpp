@@ -843,9 +843,18 @@ ExprPtr Parser::parseAssignmentExpr() {
       check(TokenKind::SlashAssign) || check(TokenKind::PercentAssign) ||
       check(TokenKind::LessLessAssign) ||
       check(TokenKind::GreaterGreaterAssign) ||
+      (check(TokenKind::Greater) && peekNext().kind == TokenKind::GreaterEqual) ||
       check(TokenKind::AmpersandAssign) || check(TokenKind::PipeAssign) ||
       check(TokenKind::CaretAssign)) {
-    Token opTok = advance();
+    Token opTok;
+    if (check(TokenKind::Greater) && peekNext().kind == TokenKind::GreaterEqual) {
+      Location loc = peek().loc;
+      advance();
+      advance();
+      opTok = Token(TokenKind::GreaterGreaterAssign, ">>=", loc);
+    } else {
+      opTok = advance();
+    }
     ExprPtr right = parseAssignmentExpr();
     return std::make_shared<AssignExprAST>(opTok.loc, left, right,
                                            opTok.lexeme);
@@ -928,8 +937,21 @@ ExprPtr Parser::parseRelational() {
 
 ExprPtr Parser::parseShift() {
   ExprPtr expr = parseAdditive();
-  while (check(TokenKind::LessLess) || check(TokenKind::GreaterGreater)) {
-    Token opTok = advance();
+  while (check(TokenKind::LessLess) || check(TokenKind::GreaterGreater) ||
+         (check(TokenKind::Greater) && peekNext().kind == TokenKind::Greater)) {
+    Token opTok;
+    if (match(TokenKind::LessLess)) {
+      opTok = previous();
+    } else if (match(TokenKind::GreaterGreater)) {
+      opTok = previous();
+    } else if (check(TokenKind::Greater) && peekNext().kind == TokenKind::Greater) {
+      Location loc = peek().loc;
+      advance();
+      advance();
+      opTok = Token(TokenKind::GreaterGreater, ">>", loc);
+    } else {
+      break;
+    }
     ExprPtr right = parseAdditive();
     expr =
         std::make_shared<BinaryExprAST>(opTok.loc, opTok.lexeme, expr, right);
@@ -1019,7 +1041,7 @@ ExprPtr Parser::parsePostfix() {
         error(loc, "Expected field, method name, or tuple index after '.'");
       }
       expr = std::make_shared<MemberAccessExprAST>(loc, expr, mName, false);
-    } else if (check(TokenKind::Arrow) &&
+    } else if (!m_inSwitchPattern && check(TokenKind::Arrow) &&
                peekNext().kind == TokenKind::Identifier) {
       advance();  // consume ->
       Token memberTok = consume(TokenKind::Identifier,
@@ -1441,7 +1463,10 @@ ExprPtr Parser::parseSwitchExpression() {
       cases.push_back({nullptr, caseBody});
     } else {
       consume(TokenKind::KwCase, "Expected 'case' in switch expression");
+      bool savedInSwitch = m_inSwitchPattern;
+      m_inSwitchPattern = true;
       ExprPtr pattern = parseExpression();
+      m_inSwitchPattern = savedInSwitch;
       consume(TokenKind::Arrow, "Expected '->' after case pattern");
       ExprPtr caseBody = parseExpression();
       match(TokenKind::Semicolon);
