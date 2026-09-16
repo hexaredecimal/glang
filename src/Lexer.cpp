@@ -361,12 +361,7 @@ Token Lexer::lexOperator() {
       }
       break;
     case '>':
-      if (match('>')) {
-        if (match('='))
-          tok = Token(TokenKind::GreaterGreaterAssign, ">>=", loc);
-        else
-          tok = Token(TokenKind::GreaterGreater, ">>", loc);
-      } else if (match('=')) {
+      if (match('=')) {
         tok = Token(TokenKind::GreaterEqual, ">=", loc);
       } else {
         tok = Token(TokenKind::Greater, ">", loc);
