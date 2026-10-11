@@ -84,6 +84,35 @@ void TypeChecker::error(const Location& loc, const std::string& msg, const std::
 TypePtr TypeChecker::resolveTypeAST(TypeASTPtr ast) {
   if (!ast) return Type::makeUnknown();
 
+  size_t scopedAlias = ast->name.rfind("::");
+  if (scopedAlias != std::string::npos) {
+    std::string ownerName = ast->name.substr(0, scopedAlias);
+    std::string aliasName = ast->name.substr(scopedAlias + 2);
+    auto owner = m_genericStructDecls.find(ownerName);
+    if (owner != m_genericStructDecls.end()) {
+      auto alias = std::find_if(
+          owner->second->typeAliases.begin(), owner->second->typeAliases.end(),
+          [&](const auto& candidate) {
+            return candidate && candidate->aliasName == aliasName;
+          });
+      if (alias != owner->second->typeAliases.end()) {
+        m_symbolTable.enterScope();
+        for (size_t i = 0; i < owner->second->typeParams.size(); ++i) {
+          TypePtr arg =
+              i < ast->templateArgs.size()
+                  ? resolveTypeAST(ast->templateArgs[i])
+                  : Type::makeGenericParam(owner->second->typeParams[i]);
+          m_symbolTable.defineType(owner->second->typeParams[i], arg);
+        }
+        TypePtr resolved = resolveTypeAST((*alias)->targetTypeAst);
+        m_symbolTable.exitScope();
+        auto result = Type::makeAlias(aliasName, resolved);
+        result->isConst = ast->isConst;
+        return result;
+      }
+    }
+  }
+
   if (ast->isPointer) {
     auto baseType = resolveTypeAST(ast->pointerBase);
     return Type::makePointer(baseType, ast->isConst);
@@ -154,6 +183,9 @@ TypePtr TypeChecker::resolveTypeAST(TypeASTPtr ast) {
   }
 
   auto type = sym->type;
+  if (type && type->kind == TypeKind::Unknown) {
+    return type;
+  }
   if (!ast->templateArgs.empty() && (type->isStruct() || type->isUnion())) {
     std::vector<TypePtr> resolvedArgs;
     for (const auto& argAst : ast->templateArgs) {
@@ -193,22 +225,45 @@ static bool containsGenericParam(TypePtr type) {
   return false;
 }
 
+static bool containsUnknownType(TypePtr type) {
+  if (!type) return false;
+  if (type->kind == TypeKind::Unknown) return true;
+  if (type->pointerBase && containsUnknownType(type->pointerBase)) return true;
+  if (type->elementType && containsUnknownType(type->elementType)) return true;
+  if (type->keyType && containsUnknownType(type->keyType)) return true;
+  if (type->aliasTarget && containsUnknownType(type->aliasTarget)) return true;
+  for (const auto& arg : type->typeArgs) {
+    if (containsUnknownType(arg)) return true;
+  }
+  for (const auto& param : type->paramTypes) {
+    if (containsUnknownType(param)) return true;
+  }
+  if (type->returnType && containsUnknownType(type->returnType)) return true;
+  for (const auto& elem : type->tupleElementTypes) {
+    if (containsUnknownType(elem)) return true;
+  }
+  return false;
+}
+
 void TypeChecker::instantiateType(TypePtr type, const Location& loc) {
   if (!type || (!type->isStruct() && !type->isUnion()) ||
       type->typeArgs.empty())
     return;
 
   for (const auto& arg : type->typeArgs) {
-    if (containsGenericParam(arg)) return;
-  }
-
-  for (const auto& arg : type->typeArgs) {
-    if (arg && (arg->isStruct() || arg->isUnion()) && !arg->typeArgs.empty()) {
+    if (arg && (arg->isStruct() || arg->isUnion()) && !arg->typeArgs.empty() &&
+        !containsUnknownType(arg)) {
       instantiateType(arg, loc);
     }
   }
 
-  std::string key = type->toString();
+  bool hasUnresolvedParam = false;
+  for (const auto& arg : type->typeArgs) {
+    if (containsGenericParam(arg) || containsUnknownType(arg)) {
+      hasUnresolvedParam = true;
+      break;
+    }
+  }
 
   if (type->isStruct()) {
     auto it = m_genericStructDecls.find(type->name);
@@ -230,6 +285,9 @@ void TypeChecker::instantiateType(TypePtr type, const Location& loc) {
           m_symbolTable.defineType(tp, Type::makeGenericParam(tp));
         }
       }
+      for (const auto& alias : templateDecl->typeAliases) {
+        if (alias) m_symbolTable.defineTypeAlias(alias->aliasName, alias);
+      }
 
       std::vector<Type::Field> realFields;
       for (const auto& f : templateDecl->fields) {
@@ -238,6 +296,16 @@ void TypeChecker::instantiateType(TypePtr type, const Location& loc) {
       }
       type->fields = realFields;
 
+      if (hasUnresolvedParam) {
+        if (std::find(m_deferredTypes.begin(), m_deferredTypes.end(), type) ==
+            m_deferredTypes.end()) {
+          m_deferredTypes.push_back(type);
+        }
+        m_symbolTable.exitScope();
+        return;
+      }
+
+      std::string key = type->toString();
       if (m_instantiatedTypeKeys.find(key) != m_instantiatedTypeKeys.end()) {
         m_symbolTable.exitScope();
         return;
@@ -293,6 +361,16 @@ void TypeChecker::instantiateType(TypePtr type, const Location& loc) {
       }
       type->fields = realFields;
 
+      if (hasUnresolvedParam) {
+        if (std::find(m_deferredTypes.begin(), m_deferredTypes.end(), type) ==
+            m_deferredTypes.end()) {
+          m_deferredTypes.push_back(type);
+        }
+        m_symbolTable.exitScope();
+        return;
+      }
+
+      std::string key = type->toString();
       if (m_instantiatedTypeKeys.find(key) != m_instantiatedTypeKeys.end()) {
         m_symbolTable.exitScope();
         return;
@@ -470,6 +548,9 @@ void TypeChecker::registerTypes(std::shared_ptr<ProgramAST> program) {
         m_symbolTable.enterScope();
         for (const auto& tp : sDecl->typeParams) {
           m_symbolTable.defineType(tp, Type::makeGenericParam(tp));
+        }
+        for (const auto& alias : sDecl->typeAliases) {
+          if (alias) m_symbolTable.defineTypeAlias(alias->aliasName, alias);
         }
         sym->type->fields.clear();
         for (const auto& f : sDecl->fields) {
@@ -755,6 +836,7 @@ TypeCheckResult TypeChecker::check(std::shared_ptr<ProgramAST> program) {
   m_activeImports.clear();
   m_importStack.clear();
   m_importedModules.clear();
+  m_deferredTypes.clear();
 
   if (!program) return m_result;
 
@@ -787,6 +869,10 @@ TypeCheckResult TypeChecker::check(std::shared_ptr<ProgramAST> program) {
     } else if (auto eDecl = std::dynamic_pointer_cast<EnumDeclAST>(decl)) {
       m_result.astNodesToCodeGen.push_back(eDecl);
     }
+  }
+
+  for (size_t i = 0; i < m_deferredTypes.size(); ++i) {
+    instantiateType(m_deferredTypes[i], Location());
   }
 
   std::vector<DeclPtr> concreteDecls;
@@ -842,6 +928,10 @@ static bool isAssignable(TypePtr src, TypePtr target) {
   TypePtr effTarget = target ? target->underlyingType() : nullptr;
   if (!effSrc) effSrc = src;
   if (!effTarget) effTarget = target;
+  if (effTarget->kind == TypeKind::Unknown ||
+      effSrc->kind == TypeKind::Unknown) {
+    return true;
+  }
 
   if (effTarget->equals(effSrc)) return true;
 
@@ -944,6 +1034,59 @@ static bool isAssignable(TypePtr src, TypePtr target) {
   }
 
   return false;
+}
+
+void TypeChecker::bindInferredType(TypePtr target, TypePtr source) {
+  if (!target || !source || target == source ||
+      source->kind == TypeKind::Error ||
+      source->kind == TypeKind::GenericParam) {
+    return;
+  }
+
+  if (target->kind == TypeKind::Unknown) {
+    if (source->kind != TypeKind::Unknown) *target = *source;
+    return;
+  }
+  if (source->kind == TypeKind::Unknown) {
+    *source = *target;
+    return;
+  }
+
+  if (target->kind == TypeKind::Alias && target->aliasTarget) {
+    bindInferredType(target->aliasTarget, source);
+    return;
+  }
+  if (source->kind == TypeKind::Alias && source->aliasTarget) {
+    bindInferredType(target, source->aliasTarget);
+    return;
+  }
+
+  if (target->kind != source->kind) return;
+  if (target->kind == TypeKind::Pointer) {
+    bindInferredType(target->pointerBase, source->pointerBase);
+  } else if (target->kind == TypeKind::Array ||
+             target->kind == TypeKind::Slice) {
+    bindInferredType(target->elementType, source->elementType);
+  } else if (target->kind == TypeKind::HashMap) {
+    bindInferredType(target->keyType, source->keyType);
+    bindInferredType(target->elementType, source->elementType);
+  } else if (target->kind == TypeKind::Struct ||
+             target->kind == TypeKind::Union) {
+    if (target->name == source->name) {
+      for (size_t i = 0; i < target->typeArgs.size() &&
+                         i < source->typeArgs.size();
+           ++i) {
+        bindInferredType(target->typeArgs[i], source->typeArgs[i]);
+      }
+    }
+  } else if (target->kind == TypeKind::Tuple) {
+    for (size_t i = 0; i < target->tupleElementTypes.size() &&
+                       i < source->tupleElementTypes.size();
+         ++i) {
+      bindInferredType(target->tupleElementTypes[i],
+                       source->tupleElementTypes[i]);
+    }
+  }
 }
 
 static bool isVariadicArgAssignable(TypePtr src, TypePtr target) {
@@ -1124,6 +1267,11 @@ void TypeChecker::checkStatement(StmtPtr stmt) {
       }
     }
 
+    if (declType && initType && declType->name != "auto") {
+      bindInferredType(initType, declType);
+      bindInferredType(declType, initType);
+    }
+
     if (!declType || declType->name == "auto") {
       if (initType) {
         declType = initType;
@@ -1161,6 +1309,8 @@ void TypeChecker::checkStatement(StmtPtr stmt) {
 
     if (m_currentReturnType && m_currentReturnType->kind != TypeKind::Error &&
         !m_currentReturnType->isGenericParam()) {
+      bindInferredType(retValType, m_currentReturnType);
+      bindInferredType(m_currentReturnType, retValType);
       if (m_currentReturnType->name == "void" && retValType->name != "void" &&
           retValType->kind != TypeKind::Error) {
         error(rStmt->loc,
@@ -1400,6 +1550,9 @@ TypePtr TypeChecker::checkBinaryExpr(std::shared_ptr<BinaryExprAST> expr) {
   if (lType->kind == TypeKind::Error || rType->kind == TypeKind::Error)
     return Type::makeError();
 
+  bindInferredType(lType, rType);
+  bindInferredType(rType, lType);
+
   const std::string& op = expr->op;
 
   if (op == "==" || op == "!=") {
@@ -1586,6 +1739,13 @@ TypePtr TypeChecker::checkUnaryExpr(std::shared_ptr<UnaryExprAST> expr) {
 
 bool TypeChecker::deduceTemplateArgs(TypePtr paramType, TypePtr argType, std::map<std::string, TypePtr>& bindings) {
   if (!paramType || !argType) return false;
+
+  if (paramType->kind == TypeKind::Alias && paramType->aliasTarget) {
+    return deduceTemplateArgs(paramType->aliasTarget, argType, bindings);
+  }
+  if (argType->kind == TypeKind::Alias && argType->aliasTarget) {
+    return deduceTemplateArgs(paramType, argType->aliasTarget, bindings);
+  }
 
   if (paramType->kind == TypeKind::GenericParam) {
     bindings[paramType->name] = argType;
@@ -2024,6 +2184,16 @@ TypePtr TypeChecker::applyMatchedFunctionCall(
     const std::map<std::string, TypePtr>& bindings) {
   if (!matchedFn) return Type::makeError();
 
+  for (size_t i = 0; i < expr->arguments.size() &&
+                     i < matchedFn->type->paramTypes.size(); ++i) {
+    TypePtr expected = matchedFn->type->paramTypes[i];
+    if (expected) expected = expected->substitute(bindings);
+    if (expr->arguments[i] && expr->arguments[i]->inferredType) {
+      bindInferredType(expr->arguments[i]->inferredType, expected);
+      bindInferredType(expected, expr->arguments[i]->inferredType);
+    }
+  }
+
   setMatchedFunctionTarget(expr, matchedFn, bindings);
   packVariadicCallArguments(expr, matchedFn, bindings);
   setCallTargetParamTypes(expr, matchedFn, bindings);
@@ -2034,6 +2204,16 @@ TypePtr TypeChecker::finalizeUfcsMatchedCall(
     std::shared_ptr<CallExprAST> expr, Symbol* matchedFn,
     const std::map<std::string, TypePtr>& bindings,
     const std::vector<ExprPtr>& fullArguments) {
+  for (size_t i = 0; i < fullArguments.size() &&
+                     matchedFn && matchedFn->type &&
+                     i < matchedFn->type->paramTypes.size(); ++i) {
+    TypePtr expected = matchedFn->type->paramTypes[i];
+    if (expected) expected = expected->substitute(bindings);
+    if (fullArguments[i] && fullArguments[i]->inferredType) {
+      bindInferredType(fullArguments[i]->inferredType, expected);
+      bindInferredType(expected, fullArguments[i]->inferredType);
+    }
+  }
   expr->arguments = fullArguments;
   setMatchedFunctionTarget(expr, matchedFn, bindings);
   expr->callee =
@@ -2207,6 +2387,8 @@ TypePtr TypeChecker::checkMemberAccessCall(
       }
       for (size_t i = 0; i < expr->arguments.size(); ++i) {
         TypePtr argT = checkExpression(expr->arguments[i]);
+        bindInferredType(argT, fType->paramTypes[i]);
+        bindInferredType(fType->paramTypes[i], argT);
         if (!isAssignable(argT, fType->paramTypes[i])) {
           error(expr->loc,
                 "Type mismatch for argument " + std::to_string(i + 1) +
@@ -2254,6 +2436,8 @@ TypePtr TypeChecker::checkCallableExprCall(std::shared_ptr<CallExprAST> expr) {
     }
     for (size_t i = 0; i < expr->arguments.size(); ++i) {
       TypePtr argT = checkExpression(expr->arguments[i]);
+      bindInferredType(argT, calleeType->paramTypes[i]);
+      bindInferredType(calleeType->paramTypes[i], argT);
       if (!isAssignable(argT, calleeType->paramTypes[i])) {
         error(expr->loc, "Type mismatch for argument " + std::to_string(i + 1) +
                              " in call: cannot convert '" +
@@ -2352,6 +2536,16 @@ TypePtr TypeChecker::checkStaticMethodCallExpr(std::shared_ptr<StaticMethodCallE
   }
 
   if (bestSm) {
+    for (size_t i = 0; i < expr->arguments.size() &&
+                       i < bestSm->type->paramTypes.size(); ++i) {
+      TypePtr expected = bestSm->type->paramTypes[i];
+      if (expected) expected = expected->substitute(bestBindings);
+      if (expr->arguments[i] && expr->arguments[i]->inferredType) {
+        bindInferredType(expr->arguments[i]->inferredType, expected);
+        bindInferredType(expected, expr->arguments[i]->inferredType);
+      }
+    }
+
     if (!bestSm->mangledName.empty()) {
       expr->targetMangledName = bestSm->mangledName;
     }
@@ -2469,12 +2663,17 @@ TypePtr TypeChecker::checkStructInitExpr(std::shared_ptr<StructInitExprAST> expr
     auto templateDecl = m_genericStructDecls[expr->structType->name];
     std::map<std::string, TypePtr> bindings;
 
-    if (!expr->structType->templateArgs.empty()) {
-      for (size_t i = 0; i < expr->structType->templateArgs.size() &&
-                         i < templateDecl->typeParams.size();
-           ++i) {
+    for (size_t i = 0; i < templateDecl->typeParams.size(); ++i) {
+      if (i < expr->structType->templateArgs.size()) {
         bindings[templateDecl->typeParams[i]] =
             resolveTypeAST(expr->structType->templateArgs[i]);
+      } else if (m_currentReturnType &&
+                 m_currentReturnType->name == expr->structType->name &&
+                 i < m_currentReturnType->typeArgs.size()) {
+        bindings[templateDecl->typeParams[i]] =
+            m_currentReturnType->typeArgs[i];
+      } else {
+        bindings[templateDecl->typeParams[i]] = Type::makeUnknown();
       }
     }
 
@@ -2505,6 +2704,9 @@ TypePtr TypeChecker::checkStructInitExpr(std::shared_ptr<StructInitExprAST> expr
         for (const auto& tp : templateDecl->typeParams) {
           m_symbolTable.defineType(tp, Type::makeGenericParam(tp));
         }
+        for (const auto& alias : templateDecl->typeAliases) {
+          if (alias) m_symbolTable.defineTypeAlias(alias->aliasName, alias);
+        }
         TypePtr declFType = resolveTypeAST(fieldTypeAST);
         m_symbolTable.exitScope();
         if (declFType) {
@@ -2515,22 +2717,15 @@ TypePtr TypeChecker::checkStructInitExpr(std::shared_ptr<StructInitExprAST> expr
 
     std::vector<TypePtr> tArgs;
     for (const auto& tp : templateDecl->typeParams) {
-      if (bindings.count(tp) && bindings[tp] && !bindings[tp]->isUnknown()) {
-        tArgs.push_back(bindings[tp]);
-      }
+      auto binding = bindings.find(tp);
+      tArgs.push_back(binding != bindings.end() && binding->second
+                          ? binding->second
+                          : Type::makeUnknown());
     }
 
-    if (tArgs.size() != templateDecl->typeParams.size() &&
-        m_currentReturnType && m_currentReturnType->name == expr->structType->name &&
-        m_currentReturnType->typeArgs.size() == templateDecl->typeParams.size()) {
-      tArgs = m_currentReturnType->typeArgs;
-    }
-
-    if (tArgs.size() == templateDecl->typeParams.size()) {
-      stType = Type::makeStruct(expr->structType->name, tArgs);
-      instantiateType(stType, expr->loc);
-      expr->structType = makeTypeASTFromType(stType, expr->loc);
-    }
+    stType = Type::makeStruct(expr->structType->name, tArgs);
+    instantiateType(stType, expr->loc);
+    expr->structType = makeTypeASTFromType(stType, expr->loc);
 
     if (stType && stType->isStruct()) {
       for (size_t i = 0; i < expr->fieldInits.size() && i < stType->fields.size(); ++i) {
@@ -2632,6 +2827,9 @@ TypePtr TypeChecker::checkClosureExpr(std::shared_ptr<ClosureExprAST> expr) {
 TypePtr TypeChecker::checkAssignExpr(std::shared_ptr<AssignExprAST> expr) {
   TypePtr targetType = checkExpression(expr->target);
   TypePtr valType = checkExpression(expr->value);
+
+  bindInferredType(targetType, valType);
+  bindInferredType(valType, targetType);
 
   if (auto ident = std::dynamic_pointer_cast<IdentifierExprAST>(expr->target)) {
     Symbol* sym = m_symbolTable.lookupVar(ident->name);

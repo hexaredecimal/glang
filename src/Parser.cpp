@@ -132,6 +132,11 @@ TypeASTPtr Parser::parseType() {
             }
             consume(TokenKind::Greater, "Expected '>' after template arguments in type");
         }
+        while (match(TokenKind::DoubleColon)) {
+            Token member = consume(TokenKind::Identifier,
+                                   "Expected identifier after '::' in type name");
+            typeAst->name += "::" + member.lexeme;
+        }
     }
 
     typeAst->isConst = isConst;
@@ -366,8 +371,15 @@ DeclPtr Parser::parseStructDecl() {
 
   consume(TokenKind::LBrace, "Expected '{' to start struct body");
   std::vector<StructField> fields;
+  std::vector<std::shared_ptr<TypeAliasDeclAST>> typeAliases;
 
   while (!isAtEnd() && !check(TokenKind::RBrace)) {
+    if (match(TokenKind::KwType)) {
+      auto alias = std::dynamic_pointer_cast<TypeAliasDeclAST>(
+          parseTypeAliasDecl());
+      if (alias) typeAliases.push_back(alias);
+      continue;
+    }
     std::string fieldDoc = peek().leadingDoc;
     TypeASTPtr fType = parseType();
     Token fName = consume(TokenKind::Identifier, "Expected struct field name");
@@ -377,7 +389,8 @@ DeclPtr Parser::parseStructDecl() {
   }
 
   consume(TokenKind::RBrace, "Expected '}' after struct body");
-  auto res = std::make_shared<StructDeclAST>(loc, name, typeParams, fields);
+  auto res = std::make_shared<StructDeclAST>(loc, name, typeParams, fields,
+                                             typeAliases);
   res->doc = declDoc;
   return res;
 }

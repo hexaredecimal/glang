@@ -1,4 +1,4 @@
-﻿#ifndef NOMINMAX
+#ifndef NOMINMAX
 #define NOMINMAX
 #endif
 #ifdef max
@@ -28,11 +28,12 @@
 #include <mutex>
 #include <atomic>
 
-#include <lsp/connection.h>
+#include <lsp/server_endpoint.h>
+#include <lsp/io/standard_io.h>
 #include <lsp/io/socket.h>
-#include <lsp/io/standardio.h>
-#include <lsp/messagehandler.h>
+#include <lsp/error.h>
 #include <lsp/messages.h>
+#include <lsp/types.h>
 #include <lsp/process.h>
 
 #if defined(_WIN32)
@@ -152,15 +153,13 @@ namespace Glang {
         class LanguageServer {
          public:
           LanguageServer(lsp::io::Stream& io, LSPServer* parent)
-              : m_connection{io},
-                m_messageHandler{m_connection},
+              : m_endpoint{io},
                 m_parent{parent} {
-            registerCallbacks();
-            m_state.store(State::Uninitialized);
+            registerHandlers();
           }
 
           bool isRunning() {
-            return m_state.load() != State::Inactive &&
+            return m_endpoint.isActive() &&
                    (m_parentProcessId.isNull() ||
                     lsp::Process::exists(*m_parentProcessId));
           }
@@ -168,7 +167,7 @@ namespace Glang {
           int run() {
             try {
               while (isRunning()) {
-                m_messageHandler.processIncomingMessages();
+                m_endpoint.processNextMessage();
               }
             } catch (const std::exception& e) {
               return EXIT_FAILURE;
@@ -177,13 +176,7 @@ namespace Glang {
           }
 
           auto initialize(lsp::InitializeParams&& params)
-              -> lsp::requests::Initialize::Result {
-            if (m_state > State::Uninitialized) {
-              throw lsp::RequestError(lsp::MessageError::InvalidRequest,
-                                      "Already initialized");
-            }
-
-            m_state.store(State::Active);
+              -> lsp::InitializeResult {
             m_parentProcessId = params.processId;
 
             lsp::InitializeResult result;
@@ -209,13 +202,11 @@ namespace Glang {
             return result;
           }
 
-          void initialized(lsp::notifications::Initialized::Params&& params) {
+          void initialized(lsp::InitializedParams&& params) {
           }
 
           void textDocumentDidOpen(
-              lsp::notifications::TextDocument_DidOpen::Params&& params) {
-            verifyInitialized();
-
+              lsp::DidOpenTextDocumentParams&& params) {
             std::string uriStr = params.textDocument.uri.toString();
             if (m_parent) {
               m_parent->openDocument(uriStr, params.textDocument.text,
@@ -225,9 +216,7 @@ namespace Glang {
           }
 
           void textDocumentDidChange(
-              lsp::notifications::TextDocument_DidChange::Params&& params) {
-            verifyInitialized();
-
+              lsp::DidChangeTextDocumentParams&& params) {
             std::string uriStr = params.textDocument.uri.toString();
             if (m_parent && !params.contentChanges.empty()) {
               // Note:  Full sync provides the new document content in the last
@@ -243,28 +232,26 @@ namespace Glang {
           }
 
           void textDocumentDidSave(
-              lsp::notifications::TextDocument_DidSave::Params&& params) {
-            verifyInitialized();
+              lsp::DidSaveTextDocumentParams&& params) {
             publishDiagnostics(params.textDocument.uri);
           }
 
           void textDocumentDidClose(
-              lsp::notifications::TextDocument_DidClose::Params&& params) {
+              lsp::DidCloseTextDocumentParams&& params) {
             std::string uriStr = params.textDocument.uri.toString();
             if (m_parent) {
               m_parent->closeDocument(uriStr);
             }
           }
 
-          auto hover(lsp::requests::TextDocument_Hover::Params&& params)
-              -> lsp::requests::TextDocument_Hover::Result {
-            verifyInitialized();
+          auto hover(lsp::HoverParams&& params)
+              -> lsp::TextDocumentHoverResult {
 
             std::string uriStr = params.textDocument.uri.toString();
             DocumentState* doc =
                 m_parent ? m_parent->getDocument(uriStr) : nullptr;
             if (!doc) {
-              return lsp::Null{};
+              return nullptr;
             }
 
             try {
@@ -340,19 +327,18 @@ namespace Glang {
                 lsp::Hover h;
                 h.contents = lsp::MarkupContent{
                     .kind = lsp::MarkupKind::Markdown, .value = md.str()};
-                return lsp::requests::TextDocument_Hover::Result(std::move(h));
+                return h;
               }
             } catch (const std::exception& e) {
               // TODO: Report
             }
 
-            return lsp::Null{};
+            return nullptr;
           }
 
           auto completion(
-              lsp::requests::TextDocument_Completion::Params&& params)
-              -> lsp::requests::TextDocument_Completion::Result {
-            verifyInitialized();
+              lsp::CompletionParams&& params)
+              -> lsp::TextDocumentCompletionResult {
 
             std::string uriStr = params.textDocument.uri.toString();
             DocumentState* doc =
@@ -459,15 +445,14 @@ namespace Glang {
           }
 
           auto definition(
-              lsp::requests::TextDocument_Definition::Params&& params)
-              -> lsp::requests::TextDocument_Definition::Result {
-            verifyInitialized();
+              lsp::DefinitionParams&& params)
+              -> lsp::TextDocumentDefinitionResult {
 
             std::string uriStr = params.textDocument.uri.toString();
             DocumentState* doc =
                 m_parent ? m_parent->getDocument(uriStr) : nullptr;
             if (!doc) {
-              return lsp::Null{};
+              return nullptr;
             }
 
             try {
@@ -480,11 +465,11 @@ namespace Glang {
               if (qRes.found && qRes.declLine > 0) {
                 std::string targetPath =
                     qRes.file.empty() ? filePath : qRes.file;
-                lsp::uint targetLine =
-                    static_cast<lsp::uint>((std::max)(0, qRes.declLine - 1));
-                lsp::uint targetCol =
-                    static_cast<lsp::uint>((std::max)(0, qRes.declColumn - 1));
-                lsp::uint len = static_cast<lsp::uint>(qRes.name.length());
+                lsp::Uint targetLine =
+                    static_cast<lsp::Uint>((std::max)(0, qRes.declLine - 1));
+                lsp::Uint targetCol =
+                    static_cast<lsp::Uint>((std::max)(0, qRes.declColumn - 1));
+                lsp::Uint len = static_cast<lsp::Uint>(qRes.name.length());
 
                 lsp::Location loc;
                 loc.uri = lsp::Uri::fileUriFromPath(targetPath);
@@ -499,13 +484,12 @@ namespace Glang {
               // TODO: Report error
             }
 
-            return lsp::Null{};
+            return nullptr;
           }
 
           auto documentSymbol(
-              lsp::requests::TextDocument_DocumentSymbol::Params&& params)
-              -> lsp::requests::TextDocument_DocumentSymbol::Result {
-            verifyInitialized();
+              lsp::DocumentSymbolParams&& params)
+              -> lsp::TextDocumentDocumentSymbolResult {
 
             std::string uriStr = params.textDocument.uri.toString();
             DocumentState* doc =
@@ -524,13 +508,13 @@ namespace Glang {
                 sym.name = name;
                 sym.kind = kind;
 
-                lsp::uint startL =
-                    static_cast<lsp::uint>((std::max)(0, line - 1));
-                lsp::uint startC =
-                    static_cast<lsp::uint>((std::max)(0, col - 1));
-                lsp::uint stopL = static_cast<lsp::uint>(
+                lsp::Uint startL =
+                    static_cast<lsp::Uint>((std::max)(0, line - 1));
+                lsp::Uint startC =
+                    static_cast<lsp::Uint>((std::max)(0, col - 1));
+                lsp::Uint stopL = static_cast<lsp::Uint>(
                     (std::max)(static_cast<int>(startL), endLine - 1));
-                lsp::uint stopC = static_cast<lsp::uint>(
+                lsp::Uint stopC = static_cast<lsp::Uint>(
                     (std::max)(static_cast<int>(startC) + 1, endCol - 1));
 
                 sym.range.start.line = startL;
@@ -542,7 +526,7 @@ namespace Glang {
                 sym.selectionRange.start.character = startC;
                 sym.selectionRange.end.line = startL;
                 sym.selectionRange.end.character =
-                    startC + static_cast<lsp::uint>(name.length());
+                    startC + static_cast<lsp::Uint>(name.length());
 
                 symbols.push_back(std::move(sym));
               };
@@ -599,15 +583,14 @@ namespace Glang {
           }
 
           auto signatureHelp(
-              lsp::requests::TextDocument_SignatureHelp::Params&& params)
-              -> lsp::requests::TextDocument_SignatureHelp::Result {
-            verifyInitialized();
+              lsp::SignatureHelpParams&& params)
+              -> lsp::TextDocumentSignatureHelpResult {
 
             std::string uriStr = params.textDocument.uri.toString();
             DocumentState* doc =
                 m_parent ? m_parent->getDocument(uriStr) : nullptr;
             if (!doc) {
-              return lsp::Null{};
+              return nullptr;
             }
 
             try {
@@ -723,7 +706,7 @@ namespace Glang {
 
               if (targetAST || targetFnType) {
                 lsp::SignatureHelp sigHelp;
-                lsp::SignatureInformation sigInfo = {0};
+                lsp::SignatureInformation sigInfo;
                 sigInfo.parameters.emplace();
 
                 std::string fullSig;
@@ -806,27 +789,25 @@ namespace Glang {
                 }
 
                 sigInfo.activeParameter =
-                    static_cast<lsp::uint>((std::max)(0, activeParam));
+                    static_cast<lsp::Uint>((std::max)(0, activeParam));
                 sigHelp.signatures.push_back(std::move(sigInfo));
                 sigHelp.activeSignature = 0;
                 sigHelp.activeParameter =
-                    static_cast<lsp::uint>((std::max)(0, activeParam));
+                    static_cast<lsp::Uint>((std::max)(0, activeParam));
                 return sigHelp;
               }
             } catch (const std::exception& e) {
               // TODO: Report error
             }
 
-            return lsp::Null{};
+            return nullptr;
           }
 
-          auto shutdown() -> lsp::requests::Shutdown::Result {
-            m_state.store(State::Shutdown);
-            return {};
+          auto shutdown() -> lsp::ShutdownResult {
+            return nullptr;
           }
 
           void exit() {
-            m_state.store(State::Inactive);
           }
 
           void publishDiagnostics(const lsp::DocumentUri& uri) {
@@ -841,9 +822,9 @@ namespace Glang {
             for (const auto& d : doc->diagnostics) {
               lsp::Diagnostic diag;
               diag.range.start.line =
-                  static_cast<lsp::uint>((std::max)(0, d.line - 1));
+                  static_cast<lsp::Uint>((std::max)(0, d.line - 1));
               diag.range.start.character =
-                  static_cast<lsp::uint>((std::max)(0, d.column - 1));
+                  static_cast<lsp::Uint>((std::max)(0, d.column - 1));
               int tokLen =
                   d.token.empty() ? 1 : static_cast<int>(d.token.length());
               diag.range.end.line = diag.range.start.line;
@@ -854,95 +835,74 @@ namespace Glang {
               params.diagnostics.push_back(std::move(diag));
             }
 
-            m_messageHandler.sendNotification<
-                lsp::notifications::TextDocument_PublishDiagnostics>(
-                std::move(params));
+            m_endpoint.textDocumentPublishDiagnostics(params);
           }
 
          private:
-          lsp::Connection m_connection;
-          lsp::MessageHandler m_messageHandler;
-          lsp::NullOr<int> m_parentProcessId;
+          lsp::ServerEndpoint m_endpoint;
+          lsp::NullOr<lsp::Int> m_parentProcessId;
           LSPServer* m_parent{nullptr};
 
-          enum class State {
-            Inactive,  // Note:  Initial state or exit notification received
-            Uninitialized,  // Note:  Started up and waiting for initialize
-                            // request
-            Active,         // Note:  Currently handling requests
-            Shutdown        // Note:  Shutdown notification received
-          };
-
-          std::atomic<State> m_state = State::Uninitialized;
-
-          void verifyInitialized() const {
-            if (m_state.load() <= State::Uninitialized) {
-              throw lsp::RequestError(lsp::MessageError::ServerNotInitialized,
-                                      "Server not initialized");
-            }
-            if (m_state.load() == State::Shutdown) {
-              throw lsp::RequestError(lsp::MessageError::InvalidRequest,
-                                      "Shutdown request received");
-            }
-          }
-
-          void registerCallbacks() {
-            m_messageHandler.add<lsp::requests::Initialize>(
-                [this](lsp::requests::Initialize::Params&& params) {
-                  return initialize(std::move(params));
-                });
-            m_messageHandler.add<lsp::notifications::Initialized>(
-                [this](lsp::notifications::Initialized::Params&& params) {
-                  initialized(std::move(params));
-                });
-            m_messageHandler.add<lsp::notifications::TextDocument_DidOpen>(
-                [this](
-                    lsp::notifications::TextDocument_DidOpen::Params&& params) {
-                  textDocumentDidOpen(std::move(params));
-                });
-            m_messageHandler.add<lsp::notifications::TextDocument_DidChange>(
-                [this](lsp::notifications::TextDocument_DidChange::Params&&
-                           params) {
-                  textDocumentDidChange(std::move(params));
-                });
-            m_messageHandler.add<lsp::notifications::TextDocument_DidSave>(
-                [this](
-                    lsp::notifications::TextDocument_DidSave::Params&& params) {
-                  textDocumentDidSave(std::move(params));
-                });
-            m_messageHandler.add<lsp::notifications::TextDocument_DidClose>(
-                [this](lsp::notifications::TextDocument_DidClose::Params&&
-                           params) {
-                  textDocumentDidClose(std::move(params));
-                });
-            m_messageHandler.add<lsp::requests::TextDocument_Hover>(
-                [this](lsp::requests::TextDocument_Hover::Params&& params) {
-                  return hover(std::move(params));
-                });
-            m_messageHandler.add<lsp::requests::TextDocument_Completion>(
-                [this](
-                    lsp::requests::TextDocument_Completion::Params&& params) {
-                  return completion(std::move(params));
-                });
-            m_messageHandler.add<lsp::requests::TextDocument_Definition>(
-                [this](
-                    lsp::requests::TextDocument_Definition::Params&& params) {
-                  return definition(std::move(params));
-                });
-            m_messageHandler.add<lsp::requests::TextDocument_DocumentSymbol>(
-                [this](lsp::requests::TextDocument_DocumentSymbol::Params&&
-                           params) {
-                  return documentSymbol(std::move(params));
-                });
-            m_messageHandler.add<lsp::requests::TextDocument_SignatureHelp>(
-                [this](lsp::requests::TextDocument_SignatureHelp::Params&&
-                           params) {
-                  return signatureHelp(std::move(params));
-                });
-            m_messageHandler.add<lsp::requests::Shutdown>(
-                [this]() { return shutdown(); });
-            m_messageHandler.add<lsp::notifications::Exit>(
-                [this]() { exit(); });
+          void registerHandlers() {
+            m_endpoint
+                .onInitialize(
+                    [this](lsp::InitializeParams&& params)
+                        -> lsp::InitializeResult {
+                      return initialize(std::move(params));
+                    })
+                .onInitialized(
+                    [this](lsp::InitializedParams&& params) {
+                      initialized(std::move(params));
+                    })
+                .onTextDocumentDidOpen(
+                    [this](lsp::DidOpenTextDocumentParams&& params) {
+                      textDocumentDidOpen(std::move(params));
+                    })
+                .onTextDocumentDidChange(
+                    [this](lsp::DidChangeTextDocumentParams&& params) {
+                      textDocumentDidChange(std::move(params));
+                    })
+                .onTextDocumentDidSave(
+                    [this](lsp::DidSaveTextDocumentParams&& params) {
+                      textDocumentDidSave(std::move(params));
+                    })
+                .onTextDocumentDidClose(
+                    [this](lsp::DidCloseTextDocumentParams&& params) {
+                      textDocumentDidClose(std::move(params));
+                    })
+                .onTextDocumentHover(
+                    [this](lsp::HoverParams&& params)
+                        -> lsp::TextDocumentHoverResult {
+                      return hover(std::move(params));
+                    })
+                .onTextDocumentCompletion(
+                    [this](lsp::CompletionParams&& params)
+                        -> lsp::TextDocumentCompletionResult {
+                      return completion(std::move(params));
+                    })
+                .onTextDocumentDefinition(
+                    [this](lsp::DefinitionParams&& params)
+                        -> lsp::TextDocumentDefinitionResult {
+                      return definition(std::move(params));
+                    })
+                .onTextDocumentDocumentSymbol(
+                    [this](lsp::DocumentSymbolParams&& params)
+                        -> lsp::TextDocumentDocumentSymbolResult {
+                      return documentSymbol(std::move(params));
+                    })
+                .onTextDocumentSignatureHelp(
+                    [this](lsp::SignatureHelpParams&& params)
+                        -> lsp::TextDocumentSignatureHelpResult {
+                      return signatureHelp(std::move(params));
+                    })
+                .onShutdown(
+                    [this]() -> lsp::ShutdownResult {
+                      return shutdown();
+                    })
+                .onExit(
+                    [this]() {
+                      exit();
+                    });
           }
         };
 
