@@ -132,11 +132,6 @@ TypeASTPtr Parser::parseType() {
             }
             consume(TokenKind::Greater, "Expected '>' after template arguments in type");
         }
-        while (match(TokenKind::DoubleColon)) {
-            Token member = consume(TokenKind::Identifier,
-                                   "Expected identifier after '::' in type name");
-            typeAst->name += "::" + member.lexeme;
-        }
     }
 
     typeAst->isConst = isConst;
@@ -377,7 +372,9 @@ DeclPtr Parser::parseStructDecl() {
     if (match(TokenKind::KwType)) {
       auto alias = std::dynamic_pointer_cast<TypeAliasDeclAST>(
           parseTypeAliasDecl());
-      if (alias) typeAliases.push_back(alias);
+      if (alias) {
+        typeAliases.push_back(std::move(alias));
+      }
       continue;
     }
     std::string fieldDoc = peek().leadingDoc;
@@ -1032,6 +1029,7 @@ ExprPtr Parser::parseUnary() {
       check(TokenKind::Ampersand) || check(TokenKind::Star) ||
       check(TokenKind::PlusPlus) || check(TokenKind::MinusMinus)) {
     Token opTok = advance();
+    // Recursively parse unary to handle chained operators like **v or -*x
     ExprPtr operand = parseUnary();
     return std::make_shared<UnaryExprAST>(opTok.loc, opTok.lexeme, operand);
   }
@@ -1658,7 +1656,7 @@ std::shared_ptr<ProgramAST> Parser::parseProgram() {
       }
 
       if (check(TokenKind::KwStruct) || check(TokenKind::KwUnion) ||
-          check(TokenKind::KwEnum)) {
+          check(TokenKind::KwEnum) || check(TokenKind::KwType)) {
         auto decl = parseDeclaration();
         if (decl && !attributes.empty()) decl->attributes = attributes;
         program->declarations.push_back(decl);

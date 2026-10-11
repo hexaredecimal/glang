@@ -449,13 +449,20 @@ struct EnumMember {
     std::string doc;
 };
 
+class TypeAliasDeclAST;
+
 class StructDeclAST : public DeclAST {
 public:
     std::string name;
     std::vector<std::string> typeParams;  // Note:  Generics e.g. <T>
     std::vector<StructField> fields;
-    StructDeclAST(Location l, std::string n, std::vector<std::string> tParams, std::vector<StructField> f)
-        : DeclAST(std::move(l)), name(std::move(n)), typeParams(std::move(tParams)), fields(std::move(f)) {}
+    std::vector<std::shared_ptr<TypeAliasDeclAST>> typeAliases;
+    StructDeclAST(Location l, std::string n, std::vector<std::string> tParams,
+                  std::vector<StructField> f,
+                  std::vector<std::shared_ptr<TypeAliasDeclAST>> aliases = {})
+        : DeclAST(std::move(l)), name(std::move(n)),
+          typeParams(std::move(tParams)), fields(std::move(f)),
+          typeAliases(std::move(aliases)) {}
     std::string toTreeString(int indent = 0) const override;
 };
 

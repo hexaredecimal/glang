@@ -728,9 +728,13 @@ std::string CodeGen::emitUnaryExpr(std::shared_ptr<UnaryExprAST> expr, ILMethodC
     if (expr->op == "*") {
         ss << emitExpr(expr->operand, ctx);
         std::string elemType = (expr->inferredType) ? toILType(expr->inferredType) : "int32";
-        if (elemType == "int32") ss << "    ldind.i4\n";
+        if (elemType == "int32" || elemType == "unsigned int32") ss << "    ldind.i4\n";
+        else if (elemType == "int16" || elemType == "unsigned int16") ss << "    ldind.i2\n";
+        else if (elemType == "uint8" || elemType == "bool") ss << "    ldind.u1\n";
+        else if (elemType == "int64" || elemType == "unsigned int64") ss << "    ldind.i8\n";
         else if (elemType == "float32") ss << "    ldind.r4\n";
         else if (elemType == "float64") ss << "    ldind.r8\n";
+        else if (!elemType.empty() && elemType.back() == '*') ss << "    ldind.i\n";
         else ss << "    ldobj " << elemType << "\n";
         return ss.str();
     }
@@ -824,8 +828,11 @@ std::string CodeGen::emitStaticMethodCallExpr(std::shared_ptr<StaticMethodCallEx
     if (!expr) return "";
     std::ostringstream ss;
 
-    std::string targetClass = sanitizeIdentifier(expr->targetType);
-    std::string methodName = sanitizeIdentifier(expr->methodName);
+    std::string methodTarget =
+        !expr->targetMangledName.empty()
+            ? sanitizeIdentifier(expr->targetMangledName)
+            : sanitizeIdentifier(expr->targetType) + "_" +
+                  sanitizeIdentifier(expr->methodName);
     std::string retType = (expr->targetReturnType) ? toILType(expr->targetReturnType) : ((expr->inferredType) ? toILType(expr->inferredType) : "void");
 
     std::vector<TypePtr> sigParams = expr->targetParamTypes;
@@ -876,7 +883,7 @@ std::string CodeGen::emitStaticMethodCallExpr(std::shared_ptr<StaticMethodCallEx
         }
     }
 
-    ss << "    call " << retType << " Program::" << targetClass << "_" << methodName << "(";
+    ss << "    call " << retType << " Program::" << methodTarget << "(";
     for (size_t i = 0; i < sigParams.size(); ++i) {
         if (i > 0) ss << ", ";
         ss << (sigParams[i] ? toILType(sigParams[i]) : "int32");
@@ -892,6 +899,7 @@ std::string CodeGen::emitAssignExpr(std::shared_ptr<AssignExprAST> expr, ILMetho
 
     if (auto id = std::dynamic_pointer_cast<IdentifierExprAST>(expr->target)) {
         ss << emitExpr(expr->value, ctx);
+        ss << "    dup\n";
         std::string sName = sanitizeIdentifier(id->name);
         auto pIt = ctx.paramMap.find(id->name);
         if (pIt != ctx.paramMap.end()) {
@@ -912,16 +920,55 @@ std::string CodeGen::emitAssignExpr(std::shared_ptr<AssignExprAST> expr, ILMetho
       // Note:  Load object address
       if (auto objId =
               std::dynamic_pointer_cast<IdentifierExprAST>(mem->object)) {
+        std::string objectType =
+            mem->object->inferredType ? toILType(mem->object->inferredType)
+                                      : "valuetype Vector3";
         int locIdx = ctx.getOrAllocLocal(sanitizeIdentifier(objId->name),
-                                         "valuetype Vector3");
+                                         objectType,
+                                         mem->object->inferredType);
         ss << "    ldloca.s " << locIdx << "\n";
       } else {
         ss << emitExpr(mem->object, ctx);
       }
         ss << emitExpr(expr->value, ctx);
+        ss << "    dup\n";
         std::string structType = (mem->object->inferredType) ? toILType(mem->object->inferredType) : "valuetype Vector3";
-        std::string fieldType = (expr->value->inferredType) ? toILType(expr->value->inferredType) : "int32";
+        std::string fieldType = expr->target->inferredType
+                                    ? toILType(expr->target->inferredType)
+                                    : (expr->value->inferredType
+                                           ? toILType(expr->value->inferredType)
+                                           : "int32");
         ss << "    stfld " << fieldType << " " << structType << "::" << sanitizeIdentifier(mem->memberName) << "\n";
+        return ss.str();
+    }
+
+    if (auto dereference =
+            std::dynamic_pointer_cast<UnaryExprAST>(expr->target);
+        dereference && dereference->op == "*" && expr->op == "=") {
+        ss << emitExpr(dereference->operand, ctx);
+        ss << emitExpr(expr->value, ctx);
+        ss << "    dup\n";
+
+        std::string elemType = dereference->inferredType
+                                   ? toILType(dereference->inferredType)
+                                   : "int32";
+        if (elemType == "int32" || elemType == "unsigned int32") {
+            ss << "    stind.i4\n";
+        } else if (elemType == "int16" || elemType == "unsigned int16") {
+            ss << "    stind.i2\n";
+        } else if (elemType == "uint8" || elemType == "bool") {
+            ss << "    stind.i1\n";
+        } else if (elemType == "int64" || elemType == "unsigned int64") {
+            ss << "    stind.i8\n";
+        } else if (elemType == "float32") {
+            ss << "    stind.r4\n";
+        } else if (elemType == "float64") {
+            ss << "    stind.r8\n";
+        } else if (!elemType.empty() && elemType.back() == '*') {
+            ss << "    stind.i\n";
+        } else {
+            ss << "    stobj " << elemType << "\n";
+        }
         return ss.str();
     }
 

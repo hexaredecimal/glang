@@ -109,6 +109,11 @@ private:
     void setCallTargetParamTypes(
         std::shared_ptr<CallExprAST> expr, Symbol* matchedFn,
         const std::map<std::string, TypePtr>& bindings);
+    void resolveDeferredPointerArguments(
+        std::vector<ExprPtr>& arguments,
+        const std::vector<TypePtr>& paramTypes,
+        const std::map<std::string, TypePtr>& bindings,
+        const Location& loc);
     TypePtr applyMatchedFunctionCall(
         std::shared_ptr<CallExprAST> expr, Symbol* matchedFn,
         const std::map<std::string, TypePtr>& bindings);

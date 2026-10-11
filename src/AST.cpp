@@ -356,6 +356,11 @@ std::string StructDeclAST::toTreeString(int indent) const {
         }
         res += ">";
     }
+    for (const auto& alias : typeAliases) {
+        if (alias) {
+            res += "\n" + alias->toTreeString(indent + 1);
+        }
+    }
     for (const auto& f : fields) {
         res += "\n" + makeIndent(indent + 1) + f.name + " : " + (f.typeAst ? f.typeAst->toTreeString(0) : "auto");
     }
