@@ -1,0 +1,55 @@
+
+[27-07-2026]: Examples data: Generated json data out of the examples
+[27-07-2026]: Showcase: Created a couple of examples. Simple stuff
+[27-07-2026]: First changelog: Generated the first CHANGELOG.json
+[27-07-2026]: Quick changelog tool: Added c++ sources for the changelog tool
+[27-07-2026]: Glang gets a git repo: Created git repo for glang
+[04-09-2026]: Finalized the LSP and broke the VS code extension
+[05-09-2026]: Fixed the VS code extension
+[05-09-2026]: Deleted the old github repo.
+[05-09-2026]: Recreated a new repo for glang.
+[05-09-2026]: Re-commit all sources including the entire compiler.
+[05-09-2026]: Added GPL-v3 as the license
+[06-09-2026]: Implemented variadic args
+[05-09-2026]: Compiled the first ever .exe from the compiler, prints and does nothing
+[08-09-2026]: Fixed a type alias bug
+[08-09-2026]: Added strict checks to type kinds
+[11-09-2026]: Code maintainance. Reformateted the code base and removed redundant functions
+[11-09-2026]: Re-implemented the test runner 
+[11-09-2026]: Improve the build system to allow building specific parts of the project. 
+[14-11-2026]: Added library-level lazy sequences and ranges (`std.container.sequence`, `std.container.lazy`) with array, slice, list, string, and range sources.
+[14-11-2026]: Fixed closures evaluating their implicit final expression twice.
+
+[15-11-2026]: Imported modules now bring their [prefix_operator], [infix_operator], and [postfix_operator] declarations into scope, including selective imports; std.container.pair exports the to operator.
+[15-11-2026]: Shorthand => functions now accept tuple parameters and tuple return types, and a new-line ( or [ after the body starts the next declaration instead of extending the expression.
+[15-11-2026]: Added regression test 74 for imported operators and tuple shorthand functions; removed stale duplicate unwrap_or declarations from std.option.
+[15-11-2026]: Expanded the source standard library with `std.string.trim`, `std.string.count`, `std.string.replace`, `std.string.compare`, `std.string.parse`, `std.algo.search`, and `std.algo.aggregate`.
+[15-11-2026]: Added `Stack<T>` (`std.container.stack`), `Queue<T>` (`std.container.queue`), `std.fs.path`, `std.fs.write`, and `std.io.error`; extended `std.io.print` with typed overloads and `println()`.
+[15-11-2026]: Extended `std.math` with truncation, roots, hypot, copysign, min/max/remainder, expm1/log1p, floating abs, interpolation, angle conversion, and classification helpers.
+[15-11-2026]: Fixed character classification wrappers to accept any nonzero libc result, gave math externs C linkage, and added regression tests 75 and 76.
+
+[16-11-2026]: Operator declarations can now use `<`, `<=`, `??`, `%%`, and `<=>`; `parseType` parses template arguments tentatively and no longer consumes `<` or `<=` from an operator name.
+[16-11-2026]: A `*` immediately before an operator parameter list now names the `*` operator instead of a pointer return type, so `Vec2 *(Vec2, double)` works while `Vec2* f()` is unchanged.
+[16-11-2026]: The lexer keeps `%%`, `^^`, and `<=>` as single custom-operator tokens while preserving `**` pointer types, `!!`/`~~`, `>>` nested generics, and `*...` variadics.
+[16-11-2026]: Imported identifier-named and symbol-named prefix, infix, and postfix operators are now available transitively and through selective imports; operators bind below built-in binary operators, so mixed comparisons need parentheses.
+[16-11-2026]: Added `Path` to `std.fs.path` with `/` path composition, `+` suffixing, `parent`, `normalize`, `with_extension`, `is_absolute`, `file_name`, `extension`, and `has_extension`.
+[16-11-2026]: Added `std.string.builder` (`StringBuilder`, `builder`, `builder_from`, `append`/`<<`, `to_string`, `clear`, `len`, `capacity`, `is_empty`) and `std.string.split` (`split_count`, `split_view`/`split_next`, in-place `split`, `join`).
+[16-11-2026]: Added `Set<T>` (`std.container.set`) and `Vec2`/`Vec3` (`std.geom.vector`) with arithmetic, dot product, cross product, magnitude, normalization, distance, and lerp.
+[16-11-2026]: Added aggregate modules `std.fs`, `std.string`, and `std.container`, and regression tests 77, 78, and 79.
+[16-11-2026]: Symbol-named operator declarations now wrap the symbol in backticks, e.g. const char* `*` (const char* left, const char* right) or T `|>` <T>(T value, T (*fn)(T)); uses remain bare (left * right, value |> fn). Bare symbol declarations are rejected with a diagnostic.
+[16-11-2026]: Added `TokenKind::QuotedOperator` and lexer support for backtick-quoted operator names, including diagnostics for unterminated, empty, and invalid quoted names; this removes the `*`-versus-pointer-return ambiguity from operator declarations.
+[16-11-2026]: Updated `std.geom.vector`, `std.fs.path`, `std.string.builder`, `std.pipe`, tests 72/73/77, and added regression test 80 for quoted operator names and pointer return types.
+[18-11-2026]: Fixed exponential type-checking of left-associative operator chains such as repeated `StringBuilder` `<<` appends by memoizing already-checked expressions; long chains now transpile quickly instead of appearing to hang.
+[18-11-2026]: Made `Box<T>` usable with custom ownership: added `Box<T>::new(deleter)`, `Box<T>::adopt(pointer, deleter)`, `Box<T>::from(value)`, and `to_box(value)`, with codegen support for deleters and value conversion, plus regression test 81.
+[18-11-2026]: Added `std.encoding` (`std.encoding.hex` and `std.encoding.base64`) with length/validation helpers and `-1` failure reporting for invalid input or short buffers.
+[18-11-2026]: Added `std.hash` with FNV-1a 32-bit and djb2 64-bit string/byte hashing, integer hashing, and hash-combination helpers.
+[18-11-2026]: Added `std.container.bitset` (`BitSet`, growable 32-bit-word bitset) and `std.container.heap` (`Heap<T>`, `List<T>`-backed binary min-heap); both are exported through `std.container`.
+[18-11-2026]: Added `std.math.random` with the deterministic xorshift64 `Rng`, bounded integer/double ranges, dice rolls, and Fisher-Yates shuffling; exported through `std.math`.
+[18-11-2026]: Added `std.geom.rect` (`Rect`, bounds/containment/intersection/union, and `+`, `*`, `<` operators) and the `std.geom` aggregate module.
+[18-11-2026]: Added `std.string.pad` with `pad_left`/`pad_start`, `pad_right`/`pad_end`, `pad_center`, `zfill`, `truncate_width`, and `repeat_text`; exported through `std.string`.
+[18-11-2026]: Null-literal comparisons now use built-in pointer comparison instead of matching custom pointer-taking operators, so `ptr == nullptr` works for any pointer type even when `std.string`'s `const char*` equality operator is imported.
+[18-11-2026]: Added stdlib regression tests 83 (encoding/hash), 84 (BitSet/heap/random), and 85 (Rect/padding).
+[18-11-2026]: Added `examples/box_dynamic_array.g` and regression test 86, demonstrating a C-style growable array whose `malloc`'ed block is owned by `Box<T>` (`std::shared_ptr<T>`) with `free` as the deleter; growth and scope exit release blocks automatically.
+[18-11-2026]: Added CUI bindings in `std/cui.g` for yappatronics' C99 immediate-mode UI library, including mirrored C layout/options structs, app/window and core widget `_ex` APIs, and `std::cui` size/color/app-desc helpers; vendored CUI 1.4.0 under `third_party/cui`.
+[18-11-2026]: Added `examples/cui/hello.g` plus a Windows build/smoke script and regression test 87; the example exercises switches, checkboxes, sliders, text input, buttons, cards, badges, progress, and toasts through the Glang binding.
+

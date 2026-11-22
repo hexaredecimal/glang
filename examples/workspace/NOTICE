@@ -1,0 +1,12 @@
+Raven workspace example
+Copyright 2026 Oscar Soirey
+
+The Glang port in workspace.g and the workspace.xml interface are adapted
+from https://github.com/oscar-soirey/Raven/tree/main/examples/workspace.
+They are distributed under the Apache License, Version 2.0; see
+LICENSE-APACHE-2.0. Changes: translated the C example to Glang and bound it
+to Raven's C API.
+
+Raven itself is licensed under the Apache License, Version 2.0.
+Raven includes third-party components under their own licenses; see Raven's
+upstream THIRD_PARTY.md.
