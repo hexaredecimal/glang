@@ -1,4 +1,4 @@
-﻿/* A simple header-only C++ argument parser library.
+/* A simple header-only C++ argument parser library.
  *
  * https://github.com/Taywee/args
  *

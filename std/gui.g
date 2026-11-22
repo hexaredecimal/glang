@@ -107,8 +107,14 @@ enum GuiKey {
   GuiKeyF,
   GuiKeyR,
   GuiKeyH,
+  GuiKeyP,
   GuiKeyT,
   GuiKeyC,
+  GuiKeyK,
+  GuiKeyD,
+  GuiKeyZ,
+  GuiKeyEqual,
+  GuiKeyMinus,
   GuiKeyDelete,
   GuiKeyBackspace,
   GuiKeyEscape,
@@ -117,7 +123,13 @@ enum GuiKey {
   GuiKeyUp,
   GuiKeyDown,
   GuiKeySpace,
-  GuiKeyZero
+  GuiKeyZero,
+  GuiKeyOne,
+  GuiKeyTwo,
+  GuiKeyEnter,
+  GuiKeyL,
+  GuiKeyG,
+  GuiKeyM
 }
 
 enum WidgetKind {
@@ -279,6 +291,7 @@ struct Widget {
   bool* checked;
 
   int clickHandler;
+  int clickTag;
   int paintHandler;
   int buildHandler;
   void* paintUser;
@@ -294,6 +307,7 @@ Widget windowWidget;
 
 ClickHandler[2048] clickHandlers;
 int clickHandlerCount = 0;
+int guiClickTag = 0;
 PaintHandler[256] paintHandlers;
 int paintHandlerCount = 0;
 BuildHandler[16] buildHandlers;
@@ -387,6 +401,7 @@ void resetWidget(Widget* widget, WidgetKind kind, int index) {
   widget.bufferCap = 0;
   widget.checked = nullptr;
   widget.clickHandler = -1;
+  widget.clickTag = 0;
   widget.paintHandler = -1;
   widget.buildHandler = -1;
   widget.paintUser = nullptr;
@@ -508,7 +523,12 @@ Widget* Input::new() => allocWidget(WidgetKind::WidgetInput);
 Widget* Scrub::new() => allocWidget(WidgetKind::WidgetScrub);
 Widget* Checkbox::new() => allocWidget(WidgetKind::WidgetCheckbox);
 Widget* Spacer::new() => allocWidget(WidgetKind::WidgetSpacer);
-Widget* Divider::new() => allocWidget(WidgetKind::WidgetDivider);
+Widget* Divider::new() {
+  Widget* widget = allocWidget(WidgetKind::WidgetDivider);
+  widget.width = fill();
+  widget.height = px(1.0);
+  return widget;
+}
 
 Widget* Icon::new() {
   Widget* widget = allocWidget(WidgetKind::WidgetIcon);
@@ -707,6 +727,13 @@ Widget* set_icon(Widget* self, const char* icon) {
 }
 
 Widget* on_click(Widget* self, ClickHandler handler) {
+  self.clickHandler = registerClick(handler);
+  self.clickable = true;
+  return self;
+}
+
+Widget* on_click_tag(Widget* self, int tag, ClickHandler handler) {
+  self.clickTag = tag;
   self.clickHandler = registerClick(handler);
   self.clickable = true;
   return self;
@@ -953,11 +980,15 @@ void emitBox(Widget* widget, CuiCtx ui, bool isButton) {
   }
   bool clicked = hovered && cui_mouse_clicked(ui, CuiMouseButton::MouseLeft);
   if (clicked) {
+    guiClickTag = widget.clickTag;
     invokeClick(widget.clickHandler);
   }
 }
 
 void emitText(Widget* widget, CuiCtx ui) {
+  if (widget.text == nullptr) {
+    return;
+  }
   CuiTextOpts opts = CuiTextOpts{
     font: toCuiFont(widget.font),
     size: widget.textSize,
@@ -970,6 +1001,9 @@ void emitText(Widget* widget, CuiCtx ui) {
 }
 
 void emitIcon(Widget* widget, CuiCtx ui) {
+  if (widget.icon == nullptr) {
+    return;
+  }
   cui_icon(ui, widget.icon, widget.textSize, toCuiColor(widget.textColor));
 }
 
@@ -1039,8 +1073,8 @@ void emitWidget(CuiCtx ui, Widget* widget) {
     cui_spacer(ui);
   } else if (widget.kind == WidgetKind::WidgetDivider) {
     CuiBox box = CuiBox{};
-    box.width = toCuiSize(Length{kind: LengthKind::LengthFill, value: 1.0});
-    box.height = toCuiSize(Length{kind: LengthKind::LengthFixed, value: 1.0});
+    box.width = toCuiSize(widget.width);
+    box.height = toCuiSize(widget.height);
     box.bg = toCuiColor(widget.bg);
     cui_box_begin(ui, &box);
     cui_box_end(ui);
@@ -1087,6 +1121,7 @@ void guiPaintDispatch(CuiCtx ui, CuiRect rect, void* user) {
 }
 
 Draw* gui::paintDraw() => &guiDrawContext;
+int gui::clickTag() => guiClickTag;
 
 // ---------------------------------------------------------------------------
 // Drawing helpers for custom canvases
@@ -1113,7 +1148,7 @@ void gui::line(Draw* draw, float x0, float y0, float x1, float y1,
 void gui::circle(Draw* draw, float cx, float cy, float radius, Color color) {
   CuiCorners corners = CuiCorners{tl: radius, tr: radius, br: radius, bl: radius};
   cui_draw_rect(draw.ui, CuiRect{x: cx - radius, y: cy - radius,
-                                 w: radius * 2.0, h: radius * 2.0},
+                                 w: (radius * 2.0) as float, h: (radius * 2.0) as float},
                 corners, toCuiColor(color));
 }
 
@@ -1186,24 +1221,57 @@ bool gui::middleDown() {
   return cui_mouse_down(guiCtx, CuiMouseButton::MouseMiddle);
 }
 
+CuiKey toCuiKey(GuiKey key) {
+  if (key == GuiKey::GuiKeyV) { return CuiKey::KeyV; }
+  if (key == GuiKey::GuiKeyF) { return CuiKey::KeyF; }
+  if (key == GuiKey::GuiKeyR) { return CuiKey::KeyR; }
+  if (key == GuiKey::GuiKeyH) { return CuiKey::KeyH; }
+  if (key == GuiKey::GuiKeyP) { return CuiKey::KeyP; }
+  if (key == GuiKey::GuiKeyT) { return CuiKey::KeyT; }
+  if (key == GuiKey::GuiKeyC) { return CuiKey::KeyC; }
+  if (key == GuiKey::GuiKeyK) { return CuiKey::KeyK; }
+  if (key == GuiKey::GuiKeyD) { return CuiKey::KeyD; }
+  if (key == GuiKey::GuiKeyZ) { return CuiKey::KeyZ; }
+  if (key == GuiKey::GuiKeyL) { return CuiKey::KeyL; }
+  if (key == GuiKey::GuiKeyG) { return CuiKey::KeyG; }
+  if (key == GuiKey::GuiKeyM) { return CuiKey::KeyM; }
+  if (key == GuiKey::GuiKeyEqual) { return CuiKey::KeyEqual; }
+  if (key == GuiKey::GuiKeyMinus) { return CuiKey::KeyMinus; }
+  if (key == GuiKey::GuiKeyDelete) { return CuiKey::KeyDelete; }
+  if (key == GuiKey::GuiKeyBackspace) { return CuiKey::KeyBackspace; }
+  if (key == GuiKey::GuiKeyEscape) { return CuiKey::KeyEscape; }
+  if (key == GuiKey::GuiKeyEnter) { return CuiKey::KeyEnter; }
+  if (key == GuiKey::GuiKeyLeft) { return CuiKey::KeyLeft; }
+  if (key == GuiKey::GuiKeyRight) { return CuiKey::KeyRight; }
+  if (key == GuiKey::GuiKeyUp) { return CuiKey::KeyUp; }
+  if (key == GuiKey::GuiKeyDown) { return CuiKey::KeyDown; }
+  if (key == GuiKey::GuiKeySpace) { return CuiKey::KeySpace; }
+  if (key == GuiKey::GuiKeyZero) { return CuiKey::Key0; }
+  if (key == GuiKey::GuiKeyOne) { return CuiKey::Key1; }
+  if (key == GuiKey::GuiKeyTwo) { return CuiKey::Key2; }
+  return CuiKey::KeyNone;
+}
+
 bool gui::keyPressed(GuiKey key) {
   if (guiCtx == nullptr) { return false; }
-  if (key == GuiKey::GuiKeyV) { return cui_key_pressed(guiCtx, CuiKey::KeyV); }
-  if (key == GuiKey::GuiKeyF) { return cui_key_pressed(guiCtx, CuiKey::KeyF); }
-  if (key == GuiKey::GuiKeyR) { return cui_key_pressed(guiCtx, CuiKey::KeyR); }
-  if (key == GuiKey::GuiKeyH) { return cui_key_pressed(guiCtx, CuiKey::KeyH); }
-  if (key == GuiKey::GuiKeyT) { return cui_key_pressed(guiCtx, CuiKey::KeyT); }
-  if (key == GuiKey::GuiKeyC) { return cui_key_pressed(guiCtx, CuiKey::KeyC); }
-  if (key == GuiKey::GuiKeyDelete) { return cui_key_pressed(guiCtx, CuiKey::KeyDelete); }
-  if (key == GuiKey::GuiKeyBackspace) { return cui_key_pressed(guiCtx, CuiKey::KeyBackspace); }
-  if (key == GuiKey::GuiKeyEscape) { return cui_key_pressed(guiCtx, CuiKey::KeyEscape); }
-  if (key == GuiKey::GuiKeyLeft) { return cui_key_pressed(guiCtx, CuiKey::KeyLeft); }
-  if (key == GuiKey::GuiKeyRight) { return cui_key_pressed(guiCtx, CuiKey::KeyRight); }
-  if (key == GuiKey::GuiKeyUp) { return cui_key_pressed(guiCtx, CuiKey::KeyUp); }
-  if (key == GuiKey::GuiKeyDown) { return cui_key_pressed(guiCtx, CuiKey::KeyDown); }
-  if (key == GuiKey::GuiKeySpace) { return cui_key_pressed(guiCtx, CuiKey::KeySpace); }
-  if (key == GuiKey::GuiKeyZero) { return cui_key_pressed(guiCtx, CuiKey::Key0); }
-  return false;
+  CuiKey ck = toCuiKey(key);
+  if (ck == CuiKey::KeyNone) { return false; }
+  return cui_key_pressed(guiCtx, ck);
+}
+
+bool gui::keyDown(GuiKey key) {
+  if (guiCtx == nullptr) { return false; }
+  CuiKey ck = toCuiKey(key);
+  if (ck == CuiKey::KeyNone) { return false; }
+  return cui_key_down(guiCtx, ck);
+}
+
+Rect gui::widgetRect(const char* id) {
+  if (guiCtx == nullptr || id == nullptr) {
+    return Rect{x: 0.0, y: 0.0, w: 0.0, h: 0.0};
+  }
+  CuiRect r = cui_get_rect(guiCtx, cui_make_id(guiCtx, id));
+  return Rect{x: r.x, y: r.y, w: r.w, h: r.h};
 }
 
 bool gui::wantsKeyboard() {
@@ -1213,6 +1281,15 @@ bool gui::wantsKeyboard() {
 
 int gui::windowWidth() => guiWindowWidth;
 int gui::windowHeight() => guiWindowHeight;
+
+void gui::setTheme(bool dark) {
+  if (guiCtx == nullptr) { return; }
+  if (dark) {
+    cui_set_theme(guiCtx, CuiThemeMode::Dark);
+  } else {
+    cui_set_theme(guiCtx, CuiThemeMode::Light);
+  }
+}
 
 void gui::minimize() {
   if (guiApp != nullptr) { cui_app_minimize(guiApp); }
@@ -1304,6 +1381,12 @@ int gui::run(Widget* window) {
   while (cui_app_frame(app)) {
     CuiCtx ui = cui_app_ui(app);
     guiCtx = ui;
+
+    CuiVec2 vp = cui_viewport_size(ui);
+    if (vp.x > 0.0 && vp.y > 0.0) {
+      guiWindowWidth = vp.x as int;
+      guiWindowHeight = vp.y as int;
+    }
 
     if (window.buildHandler >= 0) {
       resetFrame(window);

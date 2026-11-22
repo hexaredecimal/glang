@@ -1157,8 +1157,15 @@ void TypeChecker::registerTypes(std::shared_ptr<ProgramAST> program) {
           }
         }
         sym->type->fields.clear();
-        for (const auto& f : sDecl->fields) {
-          sym->type->fields.push_back({f.name, resolveTypeAST(f.typeAst)});
+        for (auto& f : sDecl->fields) {
+          TypePtr fType = resolveTypeAST(f.typeAst);
+          sym->type->fields.push_back({f.name, fType});
+          if (sDecl->typeParams.empty() && fType &&
+              fType->kind != TypeKind::Error &&
+              (!f.typeAst || !f.typeAst->isRuntimeSizedArray)) {
+            f.typeAst = makeTypeASTFromType(
+                fType, f.typeAst ? f.typeAst->loc : sDecl->loc);
+          }
         }
         m_symbolTable.exitScope();
       }
@@ -1170,8 +1177,15 @@ void TypeChecker::registerTypes(std::shared_ptr<ProgramAST> program) {
           m_symbolTable.defineType(tp, Type::makeGenericParam(tp));
         }
         sym->type->fields.clear();
-        for (const auto& f : uDecl->fields) {
-          sym->type->fields.push_back({f.name, resolveTypeAST(f.typeAst)});
+        for (auto& f : uDecl->fields) {
+          TypePtr fType = resolveTypeAST(f.typeAst);
+          sym->type->fields.push_back({f.name, fType});
+          if (uDecl->typeParams.empty() && fType &&
+              fType->kind != TypeKind::Error &&
+              (!f.typeAst || !f.typeAst->isRuntimeSizedArray)) {
+            f.typeAst = makeTypeASTFromType(
+                fType, f.typeAst ? f.typeAst->loc : uDecl->loc);
+          }
         }
         m_symbolTable.exitScope();
       }
@@ -1640,11 +1654,15 @@ static bool isAssignable(TypePtr src, TypePtr target) {
   // function/closure
   if (effTarget->isPointer() && effTarget->pointerBase &&
       (effTarget->pointerBase->isFunction() ||
-       effTarget->pointerBase->isClosure()))
-    effTarget = effTarget->pointerBase;
+       effTarget->pointerBase->isClosure())) {
+    TypePtr unwrapped = effTarget->pointerBase->underlyingType();
+    if (unwrapped) effTarget = unwrapped;
+  }
   if (effSrc->isPointer() && effSrc->pointerBase &&
-      (effSrc->pointerBase->isFunction() || effSrc->pointerBase->isClosure()))
-    effSrc = effSrc->pointerBase;
+      (effSrc->pointerBase->isFunction() || effSrc->pointerBase->isClosure())) {
+    TypePtr unwrapped = effSrc->pointerBase->underlyingType();
+    if (unwrapped) effSrc = unwrapped;
+  }
 
   if ((effTarget->isFunction() || effTarget->isClosure()) &&
       (effSrc->isFunction() || effSrc->isClosure())) {
@@ -1665,30 +1683,30 @@ static bool isAssignable(TypePtr src, TypePtr target) {
     return true;
   }
 
-  if (target->isTuple() && src->isTuple()) {
-    if (target->tupleElementTypes.size() != src->tupleElementTypes.size()) {
+  if (effTarget->isTuple() && effSrc->isTuple()) {
+    if (effTarget->tupleElementTypes.size() != effSrc->tupleElementTypes.size()) {
       return false;
     }
-    for (size_t i = 0; i < target->tupleElementTypes.size(); ++i) {
-      if (!isAssignable(src->tupleElementTypes[i],
-                        target->tupleElementTypes[i])) {
+    for (size_t i = 0; i < effTarget->tupleElementTypes.size(); ++i) {
+      if (!isAssignable(effSrc->tupleElementTypes[i],
+                        effTarget->tupleElementTypes[i])) {
         return false;
       }
     }
     return true;
   }
 
-  if (target->isPointer() && src->isPointer()) {
+  if (effTarget->isPointer() && effSrc->isPointer()) {
     return true;
   }
 
-  if ((target->isStruct() || target->isUnion()) &&
-      (src->isStruct() || src->isUnion())) {
-    if (target->name == src->name &&
-        target->typeArgs.size() == src->typeArgs.size()) {
+  if ((effTarget->isStruct() || effTarget->isUnion()) &&
+      (effSrc->isStruct() || effSrc->isUnion())) {
+    if (effTarget->name == effSrc->name &&
+        effTarget->typeArgs.size() == effSrc->typeArgs.size()) {
       bool allOk = true;
-      for (size_t i = 0; i < target->typeArgs.size(); ++i) {
-        if (!isAssignable(src->typeArgs[i], target->typeArgs[i])) {
+      for (size_t i = 0; i < effTarget->typeArgs.size(); ++i) {
+        if (!isAssignable(effSrc->typeArgs[i], effTarget->typeArgs[i])) {
           allOk = false;
           break;
         }
@@ -1697,40 +1715,40 @@ static bool isAssignable(TypePtr src, TypePtr target) {
     }
   }
 
-  if ((target->isArray() || target->isSlice()) &&
-      (src->isArray() || src->isSlice())) {
-    if (target->elementType && src->elementType) {
-      return isAssignable(src->elementType, target->elementType);
+  if ((effTarget->isArray() || effTarget->isSlice()) &&
+      (effSrc->isArray() || effSrc->isSlice())) {
+    if (effTarget->elementType && effSrc->elementType) {
+      return isAssignable(effSrc->elementType, effTarget->elementType);
     }
     return true;
   }
 
-  if (target->isHashMap() && src->isHashMap()) {
-    if (target->keyType && src->keyType && target->elementType &&
-        src->elementType) {
-      return isAssignable(src->keyType, target->keyType) &&
-             isAssignable(src->elementType, target->elementType);
+  if (effTarget->isHashMap() && effSrc->isHashMap()) {
+    if (effTarget->keyType && effSrc->keyType && effTarget->elementType &&
+        effSrc->elementType) {
+      return isAssignable(effSrc->keyType, effTarget->keyType) &&
+             isAssignable(effSrc->elementType, effTarget->elementType);
     }
     return true;
   }
 
-  if (target->isHashMap()) {
-      return isAssignable(src, target->elementType);
+  if (effTarget->isHashMap()) {
+      return isAssignable(effSrc, effTarget->elementType);
   }
 
-  if (isFloatType(target) && isIntegerType(src)) {
+  if (isFloatType(effTarget) && isIntegerType(effSrc)) {
     return true;
   }
 
-  if (isFloatType(target) && isFloatType(src)) {
+  if (isFloatType(effTarget) && isFloatType(effSrc)) {
     return true;
   }
 
-  if (isIntegerType(target) && isIntegerType(src)) {
+  if (isIntegerType(effTarget) && isIntegerType(effSrc)) {
     return true;
   }
 
-  if (target->isGenericParam() || src->isGenericParam()) {
+  if (effTarget->isGenericParam() || effSrc->isGenericParam()) {
     return true;
   }
 
@@ -2774,12 +2792,16 @@ bool TypeChecker::deduceTemplateArgs(TypePtr paramType, TypePtr argType, std::ma
   TypePtr funcPtrParam = (effParam->isPointer() && effParam->pointerBase &&
                           (effParam->pointerBase->isFunction() ||
                            effParam->pointerBase->isClosure()))
-                             ? effParam->pointerBase
+                             ? (effParam->pointerBase->underlyingType()
+                                    ? effParam->pointerBase->underlyingType()
+                                    : effParam->pointerBase)
                              : effParam;
   TypePtr funcPtrArg = (effArg->isPointer() && effArg->pointerBase &&
                         (effArg->pointerBase->isFunction() ||
                          effArg->pointerBase->isClosure()))
-                           ? effArg->pointerBase
+                           ? (effArg->pointerBase->underlyingType()
+                                  ? effArg->pointerBase->underlyingType()
+                                  : effArg->pointerBase)
                            : effArg;
 
   if (funcPtrParam->isPointer() && funcPtrArg->isPointer()) {
@@ -3630,8 +3652,10 @@ TypePtr TypeChecker::checkMemberAccessCall(
     std::shared_ptr<CallExprAST> expr,
     std::shared_ptr<MemberAccessExprAST> memAccess, TypePtr expectedType) {
   TypePtr objType = checkExpression(memAccess->object);
-  TypePtr rawObjType =
-      (objType && objType->isPointer()) ? objType->pointerBase : objType;
+  TypePtr rawObjType = objType ? objType->underlyingType() : nullptr;
+  if (rawObjType && rawObjType->isPointer() && rawObjType->pointerBase) {
+    rawObjType = rawObjType->pointerBase->underlyingType();
+  }
 
   std::string ownerName = rawObjType ? rawObjType->name : "";
   if (!ownerName.empty()) {
@@ -3664,11 +3688,11 @@ TypePtr TypeChecker::checkMemberAccessCall(
 
   if (rawObjType && (rawObjType->isStruct() || rawObjType->isUnion())) {
     for (const auto& field : rawObjType->fields) {
-      if (field.name != memAccess->memberName || !field.type ||
-          (!field.type->isFunction() && !field.type->isClosure())) {
+      TypePtr fType = field.type ? field.type->underlyingType() : nullptr;
+      if (field.name != memAccess->memberName || !fType ||
+          (!fType->isFunction() && !fType->isClosure())) {
         continue;
       }
-      auto fType = field.type;
       if (expr->arguments.size() != fType->paramTypes.size()) {
         error(expr->loc, "Function field '" + memAccess->memberName +
                              "' expected " +
@@ -3678,13 +3702,15 @@ TypePtr TypeChecker::checkMemberAccessCall(
         return Type::makeError();
       }
       for (size_t i = 0; i < expr->arguments.size(); ++i) {
-        TypePtr argT = checkExpression(expr->arguments[i]);
+        TypePtr argT =
+            checkExpression(expr->arguments[i], fType->paramTypes[i]);
         if (!isAssignable(argT, fType->paramTypes[i])) {
           error(expr->loc,
                 "Type mismatch for argument " + std::to_string(i + 1) +
                     " in call to field '" + memAccess->memberName + "'");
         }
       }
+      expr->targetParamTypes = fType->paramTypes;
       return fType->returnType ? fType->returnType
                                : Type::makePrimitive("void");
     }
@@ -3766,26 +3792,31 @@ TypePtr TypeChecker::checkIdentifierCall(
 
 TypePtr TypeChecker::checkCallableExprCall(std::shared_ptr<CallExprAST> expr) {
   TypePtr calleeType = checkExpression(expr->callee);
+  TypePtr resolvedCallee =
+      calleeType ? calleeType->underlyingType() : nullptr;
 
-  if (calleeType && (calleeType->isClosure() || calleeType->isFunction())) {
-    if (expr->arguments.size() != calleeType->paramTypes.size()) {
+  if (resolvedCallee &&
+      (resolvedCallee->isClosure() || resolvedCallee->isFunction())) {
+    if (expr->arguments.size() != resolvedCallee->paramTypes.size()) {
       error(expr->loc, "Callable expected " +
-                           std::to_string(calleeType->paramTypes.size()) +
+                           std::to_string(resolvedCallee->paramTypes.size()) +
                            " arguments, but got " +
                            std::to_string(expr->arguments.size()));
       return Type::makeError();
     }
     for (size_t i = 0; i < expr->arguments.size(); ++i) {
-      TypePtr argT = checkExpression(expr->arguments[i]);
-      if (!isAssignable(argT, calleeType->paramTypes[i])) {
+      TypePtr argT =
+          checkExpression(expr->arguments[i], resolvedCallee->paramTypes[i]);
+      if (!isAssignable(argT, resolvedCallee->paramTypes[i])) {
         error(expr->loc, "Type mismatch for argument " + std::to_string(i + 1) +
                              " in call: cannot convert '" +
                              (argT ? argT->toString() : "unknown") + "' to '" +
-                             calleeType->paramTypes[i]->toString() + "'");
+                             resolvedCallee->paramTypes[i]->toString() + "'");
       }
     }
-    return calleeType->returnType ? calleeType->returnType
-                                  : Type::makePrimitive("void");
+    expr->targetParamTypes = resolvedCallee->paramTypes;
+    return resolvedCallee->returnType ? resolvedCallee->returnType
+                                      : Type::makePrimitive("void");
   }
 
   if (!calleeType || calleeType->kind == TypeKind::Error) {
@@ -4419,9 +4450,12 @@ TypePtr TypeChecker::checkClosureExpr(std::shared_ptr<ClosureExprAST> expr) {
   m_symbolTable.enterClosureScope();
 
   std::vector<TypePtr> pTypes;
-  for (const auto& p : expr->params) {
+  for (auto& p : expr->params) {
     TypePtr pT =
         p.typeAst ? resolveTypeAST(p.typeAst) : Type::makePrimitive("int");
+    if (p.typeAst && pT && pT->kind != TypeKind::Error) {
+      p.typeAst = makeTypeASTFromType(pT, p.typeAst->loc);
+    }
     pTypes.push_back(pT);
     m_symbolTable.defineVar(p.name, pT, false);
   }
