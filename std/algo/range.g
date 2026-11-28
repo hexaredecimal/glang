@@ -2,10 +2,11 @@ import std.algo.prelude;
 import std.container.list;
 
 List<T> std::algorithm::map<T>(List<T> list, T (*fn)(T)) {
-    for (int i = 0; i < list.length; ++i) {
-        list[i] = fn(list[i]);
+    auto result = list.clone();
+    for (int i = 0; i < result.length; ++i) {
+        result[i] = fn(result[i]);
     }
-    return list;
+    return result;
 }
 
 List<T> std::algorithm::filter<T>(List<T> list, bool (*fn)(T)) {

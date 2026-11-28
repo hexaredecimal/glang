@@ -10,6 +10,8 @@ struct std::pair::Pair<T, U> {
 
 type Pair<T, U> = std::pair::Pair<T, U>;
 
+Pair<T, U> Pair<T, U>::new(T a, U b) => Pair{a, b};
+
 Pair <T, U> std::pair::make_pair<T, U>(T first, U second) {
   return Pair<T, U>{first, second};
 }

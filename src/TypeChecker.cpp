@@ -1700,6 +1700,13 @@ static bool isAssignable(TypePtr src, TypePtr target) {
     return true;
   }
 
+  // C-style array decay: a fixed array or slice can be passed where a pointer
+  // to its element type is expected.
+  if (effTarget->isPointer() &&
+      (effSrc->isArray() || effSrc->isSlice())) {
+    return true;
+  }
+
   if ((effTarget->isStruct() || effTarget->isUnion()) &&
       (effSrc->isStruct() || effSrc->isUnion())) {
     if (effTarget->name == effSrc->name &&
@@ -1833,7 +1840,7 @@ void TypeChecker::checkDeclaration(DeclPtr decl) {
       }
     }
 
-    if (hasAttribute(fDecl->attributes, "userLiteral")) {
+    if (hasAttribute(fDecl->attributes, "user_literal")) {
       if (fDecl->parameters.size() != 1) {
         error(fDecl->loc, "User defined literal function '" + fDecl->name +
                               "' must take exactly 1 parameter");
@@ -2581,6 +2588,15 @@ bool TypeChecker::isCoreListType(TypePtr type) const {
          hasAttribute(declaration->second->attributes, "core");
 }
 
+// The standard `List<T>` is implemented in Glang as an owner-backed dynamic
+// array. The compiler still gives it index syntax and `.length` support so
+// existing container and range code keeps working.
+bool TypeChecker::isStdListType(TypePtr type) const {
+  TypePtr normalized = type ? type->underlyingType() : nullptr;
+  return normalized && normalized->name == "List" &&
+         normalized->isStruct() && normalized->typeArgs.size() == 1;
+}
+
 bool TypeChecker::isCoreLazyType(TypePtr type) const {
   TypePtr normalized = type ? type->underlyingType() : nullptr;
   if (!normalized || normalized->name != "Lazy" || !normalized->isStruct()) {
@@ -3177,6 +3193,13 @@ TypeChecker::UfcsOverloadMatch TypeChecker::findBestUfcsFunctionOverload(
 
     bool match = true;
     int score = 0;
+    // Prefer overloads whose receiver is passed through unchanged over ones
+    // that require an implicit address-of or dereference. Without this bonus a
+    // value overload (`to_upper(char)`) and a pointer overload
+    // (`to_upper(const char*)`) can tie when the receiver is a pointer, and
+    // the first registered function would win arbitrarily.
+    const bool directReceiver =
+        !fullArgs.empty() && fullArgs.front().get() == memAccess->object.get();
     std::vector<TypePtr> argTypes;
     for (size_t i = 0; i < fullArgs.size(); ++i) {
       TypePtr argT = checkExpression(fullArgs[i]);
@@ -3240,6 +3263,8 @@ TypeChecker::UfcsOverloadMatch TypeChecker::findBestUfcsFunctionOverload(
       score +=
           (argTypes[i] && expectedP && argTypes[i]->equals(expectedP)) ? 2 : 1;
     }
+
+    if (match && directReceiver) score += 1;
 
     if (match && score > maxScore) {
       maxScore = score;
@@ -3624,7 +3649,7 @@ TypePtr TypeChecker::checkUserLiteralCall(std::shared_ptr<CallExprAST> expr,
   bool hasUserLitAttr = false;
   for (Symbol* fnSym : funcs) {
     if (fnSym->funcAST &&
-        hasAttribute(fnSym->funcAST->attributes, "userLiteral")) {
+        hasAttribute(fnSym->funcAST->attributes, "user_literal")) {
       hasUserLitAttr = true;
       break;
     }
@@ -4018,7 +4043,7 @@ TypePtr TypeChecker::checkMemberAccessExpr(std::shared_ptr<MemberAccessExprAST> 
   }
 
   const bool isList = objType && objType->typeArgs.size() == 1 &&
-                      isCoreListType(objType);
+                      (isCoreListType(objType) || isStdListType(objType));
 
   if (objType && objType->isPointer()) {
     objType = objType->pointerBase;
@@ -4238,7 +4263,9 @@ TypePtr TypeChecker::checkStructInitExpr(
         TypePtr targetFType = stType->fields[index].type;
         ExprPtr valExpr = fieldInit.second;
         if (targetFType && targetFType->isPointer() && valExpr &&
-            valExpr->inferredType && !valExpr->inferredType->isPointer()) {
+            valExpr->inferredType && !valExpr->inferredType->isPointer() &&
+            !valExpr->inferredType->isArray() &&
+            !valExpr->inferredType->isSlice()) {
           auto addrOf = std::make_shared<UnaryExprAST>(valExpr->loc, "&", valExpr);
           addrOf->inferredType = Type::makePointer(valExpr->inferredType);
           fieldInit.second = addrOf;
@@ -4268,7 +4295,9 @@ TypePtr TypeChecker::checkStructInitExpr(
       }
       ExprPtr value = fieldInit.second;
       if (targetFieldType && targetFieldType->isPointer() && value &&
-          value->inferredType && !value->inferredType->isPointer()) {
+          value->inferredType && !value->inferredType->isPointer() &&
+          !value->inferredType->isArray() &&
+          !value->inferredType->isSlice()) {
         auto addressOf =
             std::make_shared<UnaryExprAST>(value->loc, "&", value);
         addressOf->inferredType = Type::makePointer(value->inferredType);
@@ -4901,7 +4930,8 @@ TypePtr TypeChecker::checkIndexExpr(std::shared_ptr<IndexExprAST> expr) {
   TypePtr targetType = checkExpression(expr->target);
   TypePtr indexType = checkExpression(expr->index);
 
-  if (isCoreListType(targetType) && targetType->typeArgs.size() == 1) {
+  if ((isCoreListType(targetType) || isStdListType(targetType)) &&
+      targetType->typeArgs.size() == 1) {
     if (!isIntegerPrimitive(indexType)) {
       error(expr->loc, "List index must be an integer");
     }

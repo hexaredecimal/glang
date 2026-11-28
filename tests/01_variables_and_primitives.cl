@@ -1,7 +1,7 @@
 // Feature Test 01: Variables, Primitive Types, Const, and Auto Inference
 
-[userLiteral] uint u(int v) => v as uint;
-[userLiteral] float f(double v) => v as float;
+[user_literal] uint u(int v) => v as uint;
+[user_literal] float f(double v) => v as float;
 
 void main() {
   int a = 42;

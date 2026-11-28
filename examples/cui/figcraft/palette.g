@@ -2,6 +2,9 @@
 // Supports both Light and Dark themes with crisp contrast and zero allocations.
 
 import std.gui;
+import std.string;
+import std.encoding.hex;
+import std.math;
 
 // ---------------------------------------------------------------------------
 // Theme-aware UI3 Palette
@@ -121,6 +124,9 @@ Color fcBlueSoft(bool dark) {
 Color fcSelectionWash() => gui::rgba(242, 78, 30, 10);
 Color fcSelectionGuide() => gui::rgba(242, 78, 30, 32);
 Color fcLayoutGuide() => gui::rgba(239, 68, 68, 24);
+Color fcSnapLine() => gui::rgb(255, 68, 90);
+Color fcSnapCenter() => gui::rgb(255, 40, 88);
+Color fcSnapBadgeBg() => gui::rgb(255, 52, 86);
 Color fcWhite() => gui::rgb(255, 255, 255);
 Color fcTitleMuted() => gui::rgb(139, 139, 145);
 
@@ -144,133 +150,28 @@ const char* pickText(bool cond, const char* yes, const char* no) {
 }
 
 // ---------------------------------------------------------------------------
-// Zero-allocation string utilities
+// Stdlib-backed formatting & hex color helpers
 // ---------------------------------------------------------------------------
-
-int strLen(const char* s) {
-  if (s == nullptr) { return 0; }
-  int i = 0;
-  while (s[i] != '\0') {
-    i = i + 1;
-  }
-  return i;
-}
-
-void copyStr(char* dst, const char* src, int cap) {
-  if (dst == nullptr || cap <= 0) { return; }
-  if (src == nullptr) {
-    dst[0] = '\0';
-    return;
-  }
-  int i = 0;
-  while (src[i] != '\0' && i < cap - 1) {
-    dst[i] = src[i];
-    i = i + 1;
-  }
-  dst[i] = '\0';
-}
-
-void appendStr(char* dst, const char* src, int cap) {
-  if (dst == nullptr || src == nullptr || cap <= 0) { return; }
-  int len = strLen(dst);
-  int i = 0;
-  while (src[i] != '\0' && len + i < cap - 1) {
-    dst[len + i] = src[i];
-    i = i + 1;
-  }
-  dst[len + i] = '\0';
-}
-
-bool strEquals(const char* a, const char* b) {
-  if (a == nullptr || b == nullptr) { return a == b; }
-  int i = 0;
-  while (a[i] != '\0' && b[i] != '\0') {
-    if (a[i] != b[i]) { return false; }
-    i = i + 1;
-  }
-  return a[i] == b[i];
-}
-
-char toLowerAscii(char c) {
-  if (c >= 'A' && c <= 'Z') {
-    return ((c as int) + 32) as char;
-  }
-  return c;
-}
-
-bool strContainsFold(const char* haystack, const char* needle) {
-  if (needle == nullptr || needle[0] == '\0') { return true; }
-  if (haystack == nullptr) { return false; }
-  int nLen = strLen(needle);
-  int hLen = strLen(haystack);
-  if (nLen > hLen) { return false; }
-  for (int i = 0; i <= hLen - nLen; i = i + 1) {
-    bool ok = true;
-    for (int j = 0; j < nLen; j = j + 1) {
-      if (toLowerAscii(haystack[i + j]) != toLowerAscii(needle[j])) {
-        ok = false;
-        break;
-      }
-    }
-    if (ok) { return true; }
-  }
-  return false;
-}
-
-void formatInt(char* dst, int value, int cap) {
-  if (dst == nullptr || cap <= 1) { return; }
-  int pos = 0;
-  if (value < 0) {
-    dst[pos] = '-';
-    pos = pos + 1;
-    value = -value;
-  }
-  char[16] digits;
-  int d = 0;
-  if (value == 0) {
-    digits[0] = '0';
-    d = 1;
-  } else {
-    while (value > 0 && d < 15) {
-      digits[d] = (48 + (value % 10)) as char;
-      value = value / 10;
-      d = d + 1;
-    }
-  }
-  while (d > 0 && pos < cap - 1) {
-    d = d - 1;
-    dst[pos] = digits[d];
-    pos = pos + 1;
-  }
-  dst[pos] = '\0';
-}
 
 void formatDims(char* dst, int w, int h, int cap) {
   if (dst == nullptr || cap < 8) { return; }
-  formatInt(dst, w, cap);
-  appendStr(dst, " x ", cap);
+  std::string::format_int(dst, w, cap);
+  std::string::append_into(dst, " x ", cap);
   char[16] hBuf;
-  formatInt(&hBuf[0], h, 16);
-  appendStr(dst, &hBuf[0], cap);
+  std::string::format_int(&hBuf[0], h, 16);
+  std::string::append_into(dst, &hBuf[0], cap);
 }
 
 void formatPercent(char* dst, float ratio, int cap) {
   int pct = ((ratio * 100.0) + 0.5) as int;
-  formatInt(dst, pct, cap);
-  appendStr(dst, "%", cap);
+  std::string::format_int(dst, pct, cap);
+  std::string::append_into(dst, "%", cap);
 }
 
 void formatDegree(char* dst, float deg, int cap) {
   int v = deg as int;
-  formatInt(dst, v, cap);
-  appendStr(dst, " deg", cap);
-}
-
-char hexDigit(int nibble) {
-  int n = nibble % 16;
-  if (n < 0) { n = 0; }
-  if (n < 10) { return (48 + n) as char; }
-  return (65 + (n - 10)) as char;
+  std::string::format_int(dst, v, cap);
+  std::string::append_into(dst, " deg", cap);
 }
 
 void formatHexColor(char* dst, Color c, int cap) {
@@ -278,11 +179,29 @@ void formatHexColor(char* dst, Color c, int cap) {
   int r = c.r as int;
   int g = c.g as int;
   int b = c.b as int;
-  dst[0] = hexDigit(r / 16);
-  dst[1] = hexDigit(r % 16);
-  dst[2] = hexDigit(g / 16);
-  dst[3] = hexDigit(g % 16);
-  dst[4] = hexDigit(b / 16);
-  dst[5] = hexDigit(b % 16);
+  dst[0] = hex_digit(r / 16, true);
+  dst[1] = hex_digit(r % 16, true);
+  dst[2] = hex_digit(g / 16, true);
+  dst[3] = hex_digit(g % 16, true);
+  dst[4] = hex_digit(b / 16, true);
+  dst[5] = hex_digit(b % 16, true);
   dst[6] = '\0';
+}
+
+Color parseHexColor(const char* hex, uchar alpha, Color fallback) {
+  if (hex == nullptr) { return fallback; }
+  int idx = 0;
+  if (hex[0] == '#') { idx = 1; }
+  int[6] nib;
+  for (int i = 0; i < 6; i = i + 1) {
+    char ch = hex[idx + i];
+    if (ch == '\0') { return fallback; }
+    int v = hex_digit_value(ch);
+    if (v < 0) { return fallback; }
+    nib[i] = v;
+  }
+  int r = nib[0] * 16 + nib[1];
+  int g = nib[2] * 16 + nib[3];
+  int b = nib[4] * 16 + nib[5];
+  return gui::rgba(r, g, b, alpha as int);
 }

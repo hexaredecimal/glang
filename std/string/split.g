@@ -1,5 +1,7 @@
 import std.string.prelude;
 import std.string.builder;
+import std.string.string;
+import std.string.len;
 import std.container.list;
 
 struct std::string::split {} // Module namespace
@@ -14,7 +16,7 @@ struct SplitView {
     int count;
 }
 
-int split_count_text(const char* text, char delimiter) {
+int count_text(const char* text, char delimiter) {
     if (text == nullptr || text[0] == '\0') {
         return 1;
     }
@@ -30,12 +32,12 @@ int split_count_text(const char* text, char delimiter) {
 }
 
 int std::string::split::count(const char* text, char delimiter) =>
-    split_count_text(text, delimiter);
-int split_count(const char* text, char delimiter) =>
-    split_count_text(text, delimiter);
+    count_text(text, delimiter);
+int count(const char* text, char delimiter) =>
+    count_text(text, delimiter);
 
 /// Create a view for iterating the delimiter-separated segments of `text`.
-SplitView split_view(const char* text, char delimiter) {
+SplitView SplitView::new(const char* text, char delimiter) {
     SplitView view;
     view.text = text;
     view.delimiter = delimiter;
@@ -47,17 +49,17 @@ SplitView split_view(const char* text, char delimiter) {
             view.length = view.length + 1;
         }
     }
-    view.count = split_count_text(text, delimiter);
+    view.count = count_text(text, delimiter);
     return view;
 }
 
 SplitView std::string::split::view(const char* text, char delimiter) =>
-    split_view(text, delimiter);
+    SplitView::new(text, delimiter);
 
 /// Return the next segment as (pointer, length, found). `found` is false once
 /// every segment has been consumed. Empty segments are returned normally.
 [[no_custom_operators]]
-(const char*, int, bool) split_next(SplitView* view) {
+(const char*, int, bool) next(SplitView* view) {
     if (view == nullptr || view.offset > view.length) {
         return ("", 0, false);
     }
@@ -75,34 +77,39 @@ SplitView std::string::split::view(const char* text, char delimiter) =>
 }
 
 (const char*, int, bool) std::string::split::next(SplitView* view) =>
-    split_next(view);
+    next(view);
 
-/// Split a mutable string in place by replacing delimiters with '\0'. The
-/// returned pointers alias `text`; the list itself is managed by the runtime.
+/// Split `text` into independently owned `String` segments. The input is not
+/// modified; every returned segment owns its own storage.
 [[no_custom_operators]]
-List<char*> split(char* text, char delimiter) {
-    List<char*> parts = List<char*>{};
+List<String> split(const char* text, char delimiter) {
+    List<String> parts = List<String>::new();
     if (text == nullptr) {
         return parts;
     }
-    
-    int index = 0;
-    while (text[index] != '\0') {
-        if (text[index] == delimiter) {
-            text[index] = '\0';
-            parts.push_back(text + index + 1);
+    int length = std::string::length(text) as int;
+    int start = 0;
+    for (int index = 0; index <= length; index = index + 1) {
+        if (index == length || text[index] == delimiter) {
+            parts.push_back(String::from(text + start,
+                                         (index - start) as ulong));
+            start = index + 1;
         }
-        index = index + 1;
     }
     return parts;
 }
 
-List<char*> std::string::split::in_place(char* text, char delimiter) =>
+List<String> std::string::split::segments(const char* text,
+                                          char delimiter) =>
     split(text, delimiter);
 
-/// Join a list of strings into a fixed-capacity StringBuilder.
+/// String-receiver form.
+List<String> String::split(String* self, char delimiter) =>
+    split(String::c_str(self), delimiter);
+
+/// Join a list of borrowed strings into a fixed-capacity StringBuilder.
 StringBuilder join(List<char*> parts, const char* separator) {
-    StringBuilder result = builder();
+    StringBuilder result = StringBuilder::new();
     for (int index = 0; index < parts.length; index = index + 1) {
         if (index > 0) {
             result = builder_append_text(result, separator);
@@ -112,16 +119,32 @@ StringBuilder join(List<char*> parts, const char* separator) {
     return result;
 }
 
+/// Join a list of owned strings into a fixed-capacity StringBuilder.
+StringBuilder join(List<String> parts, const char* separator) {
+    StringBuilder result = StringBuilder::new();
+    for (int index = 0; index < parts.length; index = index + 1) {
+        if (index > 0) {
+            result = builder_append_text(result, separator);
+        }
+        result = builder_append_text(result, parts[index].c_str());
+    }
+    return result;
+}
+
 StringBuilder std::string::split::join(List<char*> parts,
+                                       const char* separator) =>
+    join(parts, separator);
+
+StringBuilder std::string::split::join(List<String> parts,
                                        const char* separator) =>
     join(parts, separator);
 
 /// Join every segment of a SplitView.
 StringBuilder join(SplitView view, const char* separator) {
-    StringBuilder result = builder();
+    StringBuilder result = StringBuilder::new();
     bool first = true;
     while (true) {
-        auto (segment, length, found) = split_next(&view);
+        auto (segment, length, found) = next(&view);
         if (!found) {
             break;
         }

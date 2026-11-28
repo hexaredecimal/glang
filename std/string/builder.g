@@ -13,17 +13,17 @@ struct StringBuilder {
 int builder_capacity(StringBuilder builder) => 2048;
 int capacity(StringBuilder builder) => 2048;
 
-StringBuilder builder() {
+StringBuilder StringBuilder::new() {
     StringBuilder result;
     result.length = 0;
     result.data[0] = '\0';
     return result;
 }
 
-StringBuilder std::string::builder() => builder();
+StringBuilder std::string::builder() => StringBuilder::new();
 
 StringBuilder builder_from(const char* text) {
-    StringBuilder result = builder();
+    StringBuilder result = StringBuilder::new();
     if (text == nullptr) {
         return result;
     }
@@ -64,25 +64,25 @@ StringBuilder builder_append_char(StringBuilder builder, char value) {
 
 StringBuilder builder_append_int(StringBuilder builder, int value) {
     char[32] buffer;
-    snprintf(&buffer[0], 32, "%d", value);
+    snprintf(buffer, 32, "%d", value);
     return builder_append_text(builder, &buffer[0]);
 }
 
 StringBuilder builder_append_long(StringBuilder builder, long value) {
     char[32] buffer;
-    snprintf(&buffer[0], 32, "%ld", value);
+    snprintf(buffer, 32, "%ld", value);
     return builder_append_text(builder, &buffer[0]);
 }
 
 StringBuilder builder_append_ulong(StringBuilder builder, ulong value) {
     char[32] buffer;
-    snprintf(&buffer[0], 32, "%lu", value);
+    snprintf(buffer, 32, "%lu", value);
     return builder_append_text(builder, &buffer[0]);
 }
 
 StringBuilder builder_append_double(StringBuilder builder, double value) {
     char[64] buffer;
-    snprintf(&buffer[0], 64, "%f", value);
+    snprintf(buffer, 64, "%f", value);
     return builder_append_text(builder, &buffer[0]);
 }
 
@@ -114,6 +114,11 @@ void clear_builder(StringBuilder* builder) {
 
 void std::string::clear_builder(StringBuilder* builder) => clear_builder(builder);
 
+const char* builder_c_str(StringBuilder* builder) => &builder.data[0];
+
+const char* std::string::builder_c_str(StringBuilder* builder) =>
+    builder_c_str(builder);
+
 const char* builder_to_string(StringBuilder* builder) => &builder.data[0];
 
 const char* std::string::builder_to_string(StringBuilder* builder) =>
@@ -138,6 +143,7 @@ StringBuilder append(StringBuilder builder, double value) =>
 StringBuilder append(StringBuilder builder, bool value) =>
     builder_append_bool(builder, value);
 
+const char* c_str(StringBuilder* builder) => builder_c_str(builder);
 const char* to_string(StringBuilder* builder) => builder_to_string(builder);
 int len(StringBuilder builder) => builder.length;
 int length(StringBuilder builder) => builder.length;

@@ -1,7 +1,7 @@
 import std.variant;
 import std.panic;
 
-union IResultU<T, E> {
+struct IResultU<T, E> {
     T value;
     E error;
 }
@@ -92,10 +92,7 @@ const char* unwrap_err_or<T>(Result<T> opt, VariantResultCallback<T> f) {
 }
 
 bool is_ok<T>(Result<T> r) => r.kind == std::VariantKind::Ok;
-bool is_err<T>(Result<T> r) => r.kind == std::VariantKind::Err;
-
-bool isOk<T>(Result<T> r) => is_ok(r);
-bool isErr<T>(Result<T> r) => is_err(r);
+bool is_error<T>(Result<T> r) => r.kind == std::VariantKind::Err;
 
 [[postfix_operator]]
 T `?`<T>(Result<T> res) => res.unwrap(); 

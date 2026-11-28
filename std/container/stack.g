@@ -9,8 +9,10 @@ struct Stack<T> {
     int count;
 }
 
-Stack<T> std::stack::make<T>() => Stack<T>{List<T>{}, 0};
-Stack<T> make_stack<T>() => std::stack::make<T>();
+Stack<T> Stack<T>::new() => std::stack::make_stack<T>();
+Stack<T> std::stack::make_stack<T>() => Stack<T>{List<T>{}, 0};
+Stack<T> std::make_stack<T>() => std::stack::make_stack<T>();
+Stack<T> make_stack<T>() => std::make_stack<T>();
 
 void std::stack::push<T>(Stack<T>* stack, T value) {
     stack.items.push_back(value);

@@ -1,4 +1,5 @@
 import std.prelude;
+import std.string.string;
 
 [[extern]]
 int printf(const char* fmt, void*...args);
@@ -47,6 +48,8 @@ void print(float val) { printf("%f", val as double); }
 void println(float val) { printf("%f\n", val as double); }
 void print(void* val) { printf("%p", val); }
 void println(void* val) { printf("%p\n", val); }
+void print(String val) { printf("%s", val.c_str()); }
+void println(String val) { printf("%s\n", val.c_str()); }
 void println() { printf("\n"); }
 
 void std::print(const char* s) => print(s);
@@ -73,4 +76,6 @@ void std::print(float val) => print(val);
 void std::println(float val) => println(val);
 void std::print(void* val) => print(val);
 void std::println(void* val) => println(val);
+void std::print(String val) => print(val);
+void std::println(String val) => println(val);
 void std::println() => println();

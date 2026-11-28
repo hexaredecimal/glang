@@ -12,8 +12,12 @@ struct Queue<T> {
     int count;
 }
 
-Queue<T> std::queue::make<T>() => Queue<T>{List<T>{}, 0, 0};
-Queue<T> make_queue<T>() => std::queue::make<T>();
+
+Queue<T> Queue<T>::new() => Queue<T>{List<T>{}, 0, 0};
+
+Queue<T> std::queue::make_queue<T>() => Queue<T>{List<T>{}, 0, 0};
+Queue<T> std::make_queue<T>() => std::queue::make_queue<T>();
+Queue<T> make_queue<T>() => std::make_queue<T>();
 
 void std::queue::enqueue<T>(Queue<T>* queue, T value) {
     queue.items.push_back(value);

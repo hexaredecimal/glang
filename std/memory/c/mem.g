@@ -1,17 +1,14 @@
 
 import std.memory.prelude;
 
-[[extern]]
-void* std::memory::memset(void* dst, int value, ulong size);
+[[extern, c_abi]]
+void* std::memory::memset(void* dst, int value, size_t size);
 
-[[extern]]
-void* std::memory::memcpy(void* dst, const void* src, ulong size);
+[[extern, c_abi]]
+void* std::memory::memcpy(void* dst, const void* src, size_t size);
 
-[[extern]]
-void* std::memory::memmove(void* dst, void* src, ulong size);
+[[extern, c_abi]]
+void* std::memory::memmove(void* dst, const void* src, size_t size);
 
-[[extern]]
-int std::memory::memcmp(void* buf1, void* buf2, ulong size);
-
-[[extern]]
-void* std::memory::memchr(void* buf, ulong size);
+[[extern, c_abi]]
+int std::memory::memcmp(const void* buf1, const void* buf2, size_t size);

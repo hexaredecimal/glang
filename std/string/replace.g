@@ -1,21 +1,24 @@
 import std.string.prelude;
+import std.string.string;
+import std.string.len;
 
-/// Replace every occurrence of `from` with `to` in place.
-/// Returns the number of bytes replaced.
-int std::string::replace_char(char* text, char from, char to) {
-    if (text == nullptr) {
-        return 0;
-    }
-    int total = 0;
-    int index = 0;
-    while (text[index] != '\0') {
-        if (text[index] == from) {
-            text[index] = to;
-            total = total + 1;
+/// Copy of `text` with every occurrence of `from` replaced by `to`. The
+/// input is not modified.
+String std::string::replace_char(const char* text, char from, char to) {
+    auto result = String::from(text);
+    char* buffer = result.data();
+    int length = result.size();
+    for (int index = 0; index < length; ++index) {
+        if (buffer[index] == from) {
+            buffer[index] = to;
         }
-        index = index + 1;
     }
-    return total;
+    return result;
 }
 
-int replace_char(char* text, char from, char to) => std::string::replace_char(text, from, to);
+/// String-receiver form.
+String String::replace_char(String* self, char from, char to) =>
+    std::string::replace_char(String::c_str(self), from, to);
+
+String replace_char(const char* text, char from, char to) =>
+    std::string::replace_char(text, from, to);

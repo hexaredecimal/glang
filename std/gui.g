@@ -129,7 +129,8 @@ enum GuiKey {
   GuiKeyEnter,
   GuiKeyL,
   GuiKeyG,
-  GuiKeyM
+  GuiKeyM,
+  GuiKeyN
 }
 
 enum WidgetKind {
@@ -147,6 +148,9 @@ enum WidgetKind {
   WidgetInput,
   WidgetScrub,
   WidgetCheckbox,
+  WidgetSwitch,
+  WidgetSlider,
+  WidgetSelect,
   WidgetSpacer,
   WidgetDivider
 }
@@ -155,7 +159,7 @@ enum WidgetKind {
 // Lengths, colors, and small helpers
 // ---------------------------------------------------------------------------
 
-[userLiteral] Length px(double value) => Length{kind: LengthKind::LengthFixed, value: value as float};
+[user_literal] Length px(double value) => Length{kind: LengthKind::LengthFixed, value: value as float};
 
 Length fill() => Length{kind: LengthKind::LengthFill, value: 1.0};
 Length fit() => Length{kind: LengthKind::LengthFit, value: 0.0};
@@ -289,6 +293,10 @@ struct Widget {
   char* buffer;
   size_t bufferCap;
   bool* checked;
+  char** selectItems;
+  int selectCount;
+  int* selectIndex;
+  bool selectSearchable;
 
   int clickHandler;
   int clickTag;
@@ -400,6 +408,10 @@ void resetWidget(Widget* widget, WidgetKind kind, int index) {
   widget.buffer = nullptr;
   widget.bufferCap = 0;
   widget.checked = nullptr;
+  widget.selectItems = nullptr;
+  widget.selectCount = 0;
+  widget.selectIndex = nullptr;
+  widget.selectSearchable = false;
   widget.clickHandler = -1;
   widget.clickTag = 0;
   widget.paintHandler = -1;
@@ -468,7 +480,7 @@ void invokeBuild(int index) {
 // ---------------------------------------------------------------------------
 
 struct Window {}
-struct Box {}
+struct BBox {}
 struct Row {}
 struct Column {}
 struct Stack {}
@@ -481,6 +493,9 @@ struct Scroll {}
 struct Input {}
 struct Scrub {}
 struct Checkbox {}
+struct Switch {}
+struct Slider {}
+struct Select {}
 struct Spacer {}
 struct Divider {}
 struct gui {}
@@ -494,7 +509,7 @@ Widget* Window::new() {
   return &windowWidget;
 }
 
-Widget* Box::new() => allocWidget(WidgetKind::WidgetBox);
+Widget* BBox::new() => allocWidget(WidgetKind::WidgetBox);
 Widget* Column::new() => allocWidget(WidgetKind::WidgetColumn);
 
 Widget* Row::new() {
@@ -522,6 +537,9 @@ Widget* Scroll::new() => allocWidget(WidgetKind::WidgetScroll);
 Widget* Input::new() => allocWidget(WidgetKind::WidgetInput);
 Widget* Scrub::new() => allocWidget(WidgetKind::WidgetScrub);
 Widget* Checkbox::new() => allocWidget(WidgetKind::WidgetCheckbox);
+Widget* Switch::new() => allocWidget(WidgetKind::WidgetSwitch);
+Widget* Slider::new() => allocWidget(WidgetKind::WidgetSlider);
+Widget* Select::new() => allocWidget(WidgetKind::WidgetSelect);
 Widget* Spacer::new() => allocWidget(WidgetKind::WidgetSpacer);
 Widget* Divider::new() {
   Widget* widget = allocWidget(WidgetKind::WidgetDivider);
@@ -774,6 +792,18 @@ Widget* set_buffer(Widget* self, char* buffer, size_t cap) {
 
 Widget* set_checked(Widget* self, bool* value) {
   self.checked = value;
+  return self;
+}
+
+Widget* set_options(Widget* self, char** items, int count, int* index) {
+  self.selectItems = items;
+  self.selectCount = count;
+  self.selectIndex = index;
+  return self;
+}
+
+Widget* set_searchable(Widget* self, bool searchable) {
+  self.selectSearchable = searchable;
   return self;
 }
 
@@ -1039,7 +1069,9 @@ void emitScrub(Widget* widget, CuiCtx ui) {
   opts.step = widget.numberStep;
   opts.suffix = widget.numberSuffix;
   opts.width = toCuiSize(widget.width);
+  if (widget.id != nullptr) { cui_push_id(ui, widget.id); }
   cui_scrub_ex(ui, widget.text, widget.number, widget.numberMin, widget.numberMax, &opts);
+  if (widget.id != nullptr) { cui_pop_id(ui); }
 }
 
 void emitCheckbox(Widget* widget, CuiCtx ui) {
@@ -1047,7 +1079,47 @@ void emitCheckbox(Widget* widget, CuiCtx ui) {
     return;
   }
   CuiCheckOpts opts = CuiCheckOpts{};
+  if (widget.id != nullptr) { cui_push_id(ui, widget.id); }
   cui_checkbox_ex(ui, widget.text, widget.checked, &opts);
+  if (widget.id != nullptr) { cui_pop_id(ui); }
+}
+
+void emitSwitch(Widget* widget, CuiCtx ui) {
+  if (widget.checked == nullptr) {
+    return;
+  }
+  CuiCheckOpts opts = CuiCheckOpts{};
+  opts.disabled = widget.disabled;
+  if (widget.id != nullptr) { cui_push_id(ui, widget.id); }
+  cui_switch_ex(ui, widget.text, widget.checked, &opts);
+  if (widget.id != nullptr) { cui_pop_id(ui); }
+}
+
+void emitSlider(Widget* widget, CuiCtx ui) {
+  if (widget.number == nullptr) {
+    return;
+  }
+  CuiSliderOpts opts = CuiSliderOpts{};
+  opts.step = widget.numberStep;
+  opts.show_value = true;
+  opts.disabled = widget.disabled;
+  opts.width = toCuiSize(widget.width);
+  if (widget.id != nullptr) { cui_push_id(ui, widget.id); }
+  cui_slider_ex(ui, widget.text, widget.number, widget.numberMin, widget.numberMax, &opts);
+  if (widget.id != nullptr) { cui_pop_id(ui); }
+}
+
+void emitSelect(Widget* widget, CuiCtx ui) {
+  if (widget.selectItems == nullptr || widget.selectIndex == nullptr || widget.selectCount <= 0) {
+    return;
+  }
+  CuiSelectOpts opts = CuiSelectOpts{};
+  opts.label = widget.label;
+  opts.placeholder = widget.placeholder;
+  opts.searchable = widget.selectSearchable;
+  opts.disabled = widget.disabled;
+  opts.width = toCuiSize(widget.width);
+  cui_select_ex(ui, widget.id, widget.selectItems, widget.selectCount, widget.selectIndex, &opts);
 }
 
 void emitCanvas(Widget* widget, CuiCtx ui) {
@@ -1086,6 +1158,12 @@ void emitWidget(CuiCtx ui, Widget* widget) {
     emitScrub(widget, ui);
   } else if (widget.kind == WidgetKind::WidgetCheckbox) {
     emitCheckbox(widget, ui);
+  } else if (widget.kind == WidgetKind::WidgetSwitch) {
+    emitSwitch(widget, ui);
+  } else if (widget.kind == WidgetKind::WidgetSlider) {
+    emitSlider(widget, ui);
+  } else if (widget.kind == WidgetKind::WidgetSelect) {
+    emitSelect(widget, ui);
   } else if (widget.kind == WidgetKind::WidgetCanvas) {
     emitCanvas(widget, ui);
   } else if (widget.kind == WidgetKind::WidgetButton) {
@@ -1235,6 +1313,7 @@ CuiKey toCuiKey(GuiKey key) {
   if (key == GuiKey::GuiKeyL) { return CuiKey::KeyL; }
   if (key == GuiKey::GuiKeyG) { return CuiKey::KeyG; }
   if (key == GuiKey::GuiKeyM) { return CuiKey::KeyM; }
+  if (key == GuiKey::GuiKeyN) { return CuiKey::KeyN; }
   if (key == GuiKey::GuiKeyEqual) { return CuiKey::KeyEqual; }
   if (key == GuiKey::GuiKeyMinus) { return CuiKey::KeyMinus; }
   if (key == GuiKey::GuiKeyDelete) { return CuiKey::KeyDelete; }

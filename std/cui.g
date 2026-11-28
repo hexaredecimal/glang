@@ -793,14 +793,14 @@ struct CuiSelectOpts {
   int _;
   const char* label;
   const char* placeholder;
-  const char** icons;
+  char** icons;
   bool searchable;
   bool disabled;
   CuiSize width;
 }
 
 [[extern, c_abi]]
-bool cui_select_ex(CuiCtx ui, const char* id, const char** items, int count, int* index, CuiSelectOpts* opts);
+bool cui_select_ex(CuiCtx ui, const char* id, char** items, int count, int* index, CuiSelectOpts* opts);
 
 // ---------------------------------------------------------------------------
 // Feedback and display

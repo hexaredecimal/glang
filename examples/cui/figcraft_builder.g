@@ -20,7 +20,7 @@ int main() {
   auto window = Window::new()
     |> set_size(1440px, 900px)
     |> set_min_size(1180.0, 760.0)
-    |> set_title("FigCraft - Ridgeline Studio")
+    |> set_title("FigCraft")
     |> set_bg(fcChrome(false));
 
   window.on_build() {

@@ -1,5 +1,6 @@
 import std.string.prelude;
 import std.string.len;
+import std.chars.types;
 
 [[extern, c_abi]]
 int strcmp(const char* s1, const char* s2);
@@ -22,6 +23,36 @@ bool std::string::contains(const char* str, const char* substr) {
         bool matches = true;
         for (int offset = 0; offset < needleLength; offset = offset + 1) {
             if (str[index + offset] != substr[offset]) {
+                matches = false;
+                break;
+            }
+        }
+        if (matches) {
+            return true;
+        }
+        index = index + 1;
+    }
+    return false;
+}
+
+[[no_custom_operators]]
+bool std::string::contains_ignore_case(const char* str, const char* substr) {
+    if (substr == nullptr || substr[0] == '\0') {
+        return true;
+    }
+    if (str == nullptr) {
+        return false;
+    }
+    int textLength = str.length() as int;
+    int needleLength = substr.length() as int;
+    if (needleLength > textLength) {
+        return false;
+    }
+    int index = 0;
+    while (index + needleLength <= textLength) {
+        bool matches = true;
+        for (int offset = 0; offset < needleLength; offset = offset + 1) {
+            if (std::chars::to_lower(str[index + offset]) != std::chars::to_lower(substr[offset])) {
                 matches = false;
                 break;
             }
@@ -95,6 +126,8 @@ int std::string::index_of(const char* str, const char* substr) {
 }
 
 bool contains(const char* str, const char* substr) => std::string::contains(str, substr);
+bool contains_ignore_case(const char* str, const char* substr) =>
+    std::string::contains_ignore_case(str, substr);
 bool starts_with(const char* str, const char* prefix) => std::string::starts_with(str, prefix);
 bool ends_with(const char* str, const char* suffix) => std::string::ends_with(str, suffix);
 bool equals(const char* s1, const char* s2) => std::string::equals(s1, s2);

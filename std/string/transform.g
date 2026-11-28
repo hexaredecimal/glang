@@ -1,21 +1,36 @@
-
-
 import std.chars.types;
-import std.string.dup;
+import std.string.string;
+import std.string.len;
 
-void std::string::to_upper(char* s) {
-    auto len = s.strlen();
+/// Copy of `s` with every character converted to upper case. The input is
+/// not modified.
+String std::string::to_upper(const char* s) {
+    auto result = String::from(s);
+    char* text = result.data();
+    int len = result.size();
     for (int i = 0; i < len; ++i) {
-        s[i] = (s[i] as uchar).to_upper();
+        text[i] = (text[i] as uchar).to_upper();
     }
+    return result;
 }
 
-void std::string::to_lower(char* s) {
-    auto len = s.strlen();
+/// Copy of `s` with every character converted to lower case. The input is
+/// not modified.
+String std::string::to_lower(const char* s) {
+    auto result = String::from(s);
+    char* text = result.data();
+    int len = result.size();
     for (int i = 0; i < len; ++i) {
-        s[i] =(s[i] as uchar).to_lower();
+        text[i] = (text[i] as uchar).to_lower();
     }
+    return result;
 }
 
-void to_lower(char* s) => std::string::to_lower(s);
-void to_upper(char* s) => std::string::to_upper(s);
+/// String-receiver forms.
+String String::to_upper(String* self) =>
+    std::string::to_upper(String::c_str(self));
+String String::to_lower(String* self) =>
+    std::string::to_lower(String::c_str(self));
+
+String to_lower(const char* s) => std::string::to_lower(s);
+String to_upper(const char* s) => std::string::to_upper(s);

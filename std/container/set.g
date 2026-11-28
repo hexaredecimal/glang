@@ -11,13 +11,15 @@ struct Set<T> {
     int count;
 }
 
-Set<T> std::set::make<T>() {
+Set<T> Set<T>::new() => std::set::make_set<T>();
+
+Set<T> std::set::make_set<T>() {
     Set<T> result;
     result.count = 0;
     return result;
 }
 
-Set<T> make_set<T>() => std::set::make<T>();
+Set<T> std::make_set<T>() => std::set::make_set<T>();
 
 /// Insert a value. Returns true when the value was not already present.
 bool std::set::insert<T>(Set<T>* set, T value) {

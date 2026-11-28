@@ -9,6 +9,7 @@ Mode Mode::Write = "w";
 Mode Mode::Read = "r";
 Mode Mode::ReadAndWrite = "wr";
 
+File File::new() => File{}
 
 type Seek = int;
 

@@ -204,7 +204,7 @@ void build_file(args::Subparser& parser) {
     }
 
     Nob_Cmd cmd = {};
-    nob_cmd_append(&cmd, "g++", "-std=c++26", "-Wno-write-strings", "-Wno-attributes",
+    nob_cmd_append(&cmd, "g++", "-std=c++26", "-Wno-write-strings", "-Wno-attributes", "-fpermissive",
                    cppPathString.c_str(), "-o", binaryPathString.c_str());
     std::vector<std::string> linkerFlags;
     linkerFlags.reserve(include_paths.Get().size() + libs_paths.Get().size() +

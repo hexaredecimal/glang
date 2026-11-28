@@ -9,6 +9,7 @@
 //   build\test79.exe
 
 import std.string;
+import std.string.owned;
 import std.container;
 import std.geom.vector;
 import std.math;
@@ -27,14 +28,15 @@ void main() {
   auto joined = join(view, "-");
   if (compare_strings(joined.to_string(), "two-three") != 0) std::exit(6);
 
-  char[32] buffer = ['a', ',', 'b', ',', 'c', '\0'];
-  auto parts = split(&buffer[0], ',');
+  const char* text = "a,b,c";
+  auto parts = split(text, ',');
   if (parts.length != 3) std::exit(7);
-  if (compare_strings(parts[0], "a") != 0) std::exit(8);
-  if (compare_strings(parts[2], "c") != 0) std::exit(9);
+  if (compare_strings(parts[0].c_str(), "a") != 0) std::exit(8);
+  if (compare_strings(parts[2].c_str(), "c") != 0) std::exit(9);
+  if (compare_strings(text, "a,b,c") != 0) std::exit(10);
 
   auto rebuilt = join(parts, "|");
-  if (compare_strings(rebuilt.to_string(), "a|b|c") != 0) std::exit(10);
+  if (compare_strings(rebuilt.to_string(), "a|b|c") != 0) std::exit(11);
 
   auto set = make_set<int>();
   if (!set.add(1)) std::exit(11);
@@ -92,3 +94,4 @@ void main() {
   Vec3 sum3 = c + d;
   if (sum3.x != 1.0 || sum3.y != 1.0 || sum3.z != 0.0) std::exit(36);
 }
+

@@ -3,14 +3,35 @@
 // and prototype interactions.
 
 import std.gui;
+import std.string;
 import examples.cui.figcraft.palette;
 import examples.cui.figcraft.model;
+
+void writeNodeRowId(DesignNode* n) {
+  std::string::copy(&n.rowId[0], "fc-l-", 20);
+  char[12] buf;
+  std::string::format_int(&buf[0], n.id, 12);
+  std::string::append_into(&n.rowId[0], &buf[0], 20);
+}
 
 void addNodeToEditor(Editor* e, NodeKind kind, const char* name, const char* body,
                      float x, float y, float w, float h,
                      Color fill, Color ink, Color stroke,
                      float radius, float border, float textSize, int font) {
   if (e.count >= 160) { return; }
+  int sides = 6;
+  float ratio = 0.0;
+  if (kind == NodeKind::NodeStar) {
+    sides = 5;
+    ratio = 0.42;
+  } else if (kind == NodeKind::NodeArrow) {
+    ratio = 0.38;
+  }
+  int endCap = if (kind == NodeKind::NodeArrow) 1 else 0;
+  int tAlign = if (kind == NodeKind::NodeButton) 1 else 0;
+  int vAlign = if (kind == NodeKind::NodeButton || kind == NodeKind::NodeComment) 1 else 0;
+  Color effStroke = if (stroke.a > 0) stroke else fcDesignBorder();
+
   DesignNode n = DesignNode{
     kind: kind as int,
     id: e.nextId,
@@ -20,19 +41,69 @@ void addNodeToEditor(Editor* e, NodeKind kind, const char* name, const char* bod
     w: w,
     h: h,
     radius: radius,
+    independentCorners: false,
+    radiusTL: radius,
+    radiusTR: radius,
+    radiusBR: radius,
+    radiusBL: radius,
     border: border,
+    strokeAlign: 0,
+    strokeStyle: 0,
     rotation: 0.0,
     opacity: 1.0,
+    blendMode: 0,
+    constraintH: 0,
+    constraintV: 0,
+    clipContent: kind == NodeKind::NodeFrame || kind == NodeKind::NodeSection,
+    fillVisible: fill.a > 0,
+    strokeVisible: border > 0.0 && stroke.a > 0,
     textSize: textSize,
     font: font,
+    fontWeight: if (font == 1) 3 else if (font == 2) 5 else 2,
+    fontItalic: false,
+    textAlign: tAlign,
+    textVAlign: vAlign,
+    lineHeight: 1.3,
+    letterSpacing: 0.0,
+    paragraphSpacing: 0.0,
+    textDecoration: 0,
+    textCase: 0,
+    shapeSides: sides,
+    shapeRatio: ratio,
+    arrowStartCap: 0,
+    arrowEndCap: endCap,
     fill: fill,
     ink: ink,
-    stroke: stroke,
+    stroke: effStroke,
+    dropShadowEnabled: false,
+    dropShadowVisible: true,
+    dropShadowX: 0.0,
+    dropShadowY: 8.0,
+    dropShadowBlur: 18.0,
+    dropShadowSpread: 0.0,
+    dropShadowColor: gui::rgba(15, 23, 38, 56),
+    innerShadowEnabled: false,
+    innerShadowVisible: true,
+    innerShadowX: 0.0,
+    innerShadowY: 3.0,
+    innerShadowBlur: 10.0,
+    innerShadowSpread: 0.0,
+    innerShadowColor: gui::rgba(15, 23, 38, 72),
+    layerBlurEnabled: false,
+    layerBlurVisible: true,
+    layerBlur: 6.0,
+    bgBlurEnabled: false,
+    bgBlurVisible: true,
+    bgBlur: 12.0,
+    bgBlurColor: gui::rgba(255, 255, 255, 168),
     visible: true,
-    locked: false
+    locked: false,
+    parentId: -1,
+    expanded: true
   };
-  copyStr(&n.name[0], name, 64);
-  copyStr(&n.body[0], body, 128);
+  std::string::copy(&n.name[0], name, 64);
+  std::string::copy(&n.body[0], body, 128);
+  writeNodeRowId(&n);
   e.nextId = e.nextId + 1;
   e.nodes[e.count] = n;
   e.count = e.count + 1;
@@ -87,7 +158,7 @@ void populateDashboardScene(Editor* e) {
   e.stageW = 1440.0;
   e.stageH = 960.0;
   e.stageBg = fcDesignBg(false);
-  copyStr(&e.stageName[0], "Dashboard - Overview", 48);
+  std::string::copy(&e.stageName[0], "Dashboard - Overview", 48);
 
   Color sidebar = gui::rgb(12, 25, 41);
   Color sidebarRaised = gui::rgb(23, 43, 62);
@@ -254,7 +325,7 @@ void populateComponentsScene(Editor* e) {
   e.stageW = 1440.0;
   e.stageH = 960.0;
   e.stageBg = fcWhite();
-  copyStr(&e.stageName[0], "Design System - Kit", 48);
+  std::string::copy(&e.stageName[0], "Design System - Kit", 48);
 
   Color ink = gui::rgb(23, 32, 44);
   Color muted = gui::rgb(122, 135, 148);
@@ -296,10 +367,289 @@ void populateComponentsScene(Editor* e) {
   addScLine(e, "30-Day Line", 1044.0, 560.0, 274.0, 220.0, fcChartBlue());
 }
 
+void populateMobileAppScene(Editor* e) {
+  e.count = 0;
+  e.nextId = 700;
+  e.stageW = 390.0;
+  e.stageH = 844.0;
+  e.stageBg = gui::rgb(15, 23, 38);
+  std::string::copy(&e.stageName[0], "iPhone 16 Pro - Home", 48);
+
+  Color navy = fcNavy();
+  Color raised = fcNavyRaised();
+  Color green = fcGreen();
+  Color white = fcWhite();
+  Color muted = gui::rgb(148, 163, 184);
+
+  addScRect(e, "Status Bar", 0.0, 0.0, 390.0, 48.0, navy, 0.0, 0.0, gui::clear());
+  addScText(e, "9:41", 26.0, 16.0, 60.0, 20.0, 13.0, white, 1);
+  addScRect(e, "Dynamic Island", 135.0, 12.0, 120.0, 26.0, gui::rgb(5, 8, 15), 13.0, 0.0, gui::clear());
+  addScText(e, "Trail Tracker", 24.0, 66.0, 240.0, 32.0, 22.0, white, 1);
+  addScText(e, "Summit Ridge · Active Route", 24.0, 98.0, 260.0, 20.0, 11.0, muted, 0);
+
+  addScRect(e, "Hero Elevation Card", 20.0, 136.0, 350.0, 196.0, raised, 16.0, 1.0, gui::rgb(45, 59, 82));
+  addScText(e, "DISTANCE TODAY", 38.0, 156.0, 180.0, 18.0, 9.5, muted, 1);
+  addScText(e, "14.8 km", 38.0, 180.0, 220.0, 44.0, 32.0, white, 1);
+  addScSpark(e, "Elevation Spark", 38.0, 242.0, 314.0, 52.0, green, 1);
+  addScButton(e, "Pause Hike", 38.0, 282.0, 140.0, 34.0, green, navy);
+
+  addScRect(e, "Action Pace Pill", 20.0, 352.0, 168.0, 88.0, raised, 14.0, 1.0, gui::rgb(45, 59, 82));
+  addScText(e, "Avg Pace", 34.0, 368.0, 120.0, 18.0, 10.0, muted, 0);
+  addScText(e, "5'12\" /km", 34.0, 392.0, 130.0, 28.0, 19.0, white, 1);
+
+  addScRect(e, "Action Gain Pill", 202.0, 352.0, 168.0, 88.0, raised, 14.0, 1.0, gui::rgb(45, 59, 82));
+  addScText(e, "Elev Gain", 216.0, 368.0, 120.0, 18.0, 10.0, muted, 0);
+  addScText(e, "+640 m", 216.0, 392.0, 130.0, 28.0, 19.0, green, 1);
+
+  addScRect(e, "Checkpoints Card", 20.0, 460.0, 350.0, 270.0, white, 16.0, 0.0, gui::clear());
+  addScText(e, "Upcoming Checkpoints", 38.0, 480.0, 240.0, 24.0, 14.0, navy, 1);
+  addScRect(e, "Checkpoint 1", 38.0, 520.0, 314.0, 52.0, fcDesignBg(false), 10.0, 0.0, gui::clear());
+  addScText(e, "Mirror Tarn · 2.1 km ahead", 54.0, 536.0, 240.0, 20.0, 11.5, navy, 1);
+  addScRect(e, "Checkpoint 2", 38.0, 584.0, 314.0, 52.0, fcDesignBg(false), 10.0, 0.0, gui::clear());
+  addScText(e, "North Saddle · 4.6 km ahead", 54.0, 600.0, 240.0, 20.0, 11.5, navy, 1);
+  addScRect(e, "Checkpoint 3", 38.0, 648.0, 314.0, 52.0, fcDesignBg(false), 10.0, 0.0, gui::clear());
+  addScText(e, "Summit Hut · 7.4 km ahead", 54.0, 664.0, 240.0, 20.0, 11.5, navy, 1);
+
+  addScRect(e, "Bottom Tab Bar", 0.0, 756.0, 390.0, 88.0, raised, 0.0, 0.0, gui::clear());
+  addScDot(e, "Home Tab Dot", 72.0, 782.0, 10.0, green);
+  addScText(e, "Explore", 54.0, 800.0, 60.0, 16.0, 9.5, green, 1);
+  addScText(e, "Map", 176.0, 800.0, 50.0, 16.0, 9.5, muted, 0);
+  addScText(e, "Saved", 290.0, 800.0, 50.0, 16.0, 9.5, muted, 0);
+}
+
+void populateLandingPageScene(Editor* e) {
+  e.count = 0;
+  e.nextId = 800;
+  e.stageW = 1440.0;
+  e.stageH = 960.0;
+  e.stageBg = fcWhite();
+  std::string::copy(&e.stageName[0], "Landing Page - Hero", 48);
+
+  Color navy = fcNavy();
+  Color green = fcGreen();
+  Color greenDark = fcGreenDark();
+  Color muted = fcTitleMuted();
+  Color line = fcDesignBorder();
+
+  addScRect(e, "Top Nav", 0.0, 0.0, 1440.0, 76.0, fcWhite(), 0.0, 1.0, line);
+  addScRect(e, "Logo Mark", 80.0, 22.0, 32.0, 32.0, green, 8.0, 0.0, gui::clear());
+  addScText(e, "ArtCraft Studio", 124.0, 27.0, 200.0, 24.0, 15.0, navy, 1);
+  addScText(e, "Features", 560.0, 28.0, 80.0, 20.0, 11.5, muted, 0);
+  addScText(e, "Templates", 660.0, 28.0, 90.0, 20.0, 11.5, muted, 0);
+  addScText(e, "Pricing", 770.0, 28.0, 70.0, 20.0, 11.5, muted, 0);
+  addScButton(e, "Start Designing", 1200.0, 19.0, 160.0, 38.0, green, navy);
+
+  addScRect(e, "Hero Pill", 80.0, 128.0, 210.0, 28.0, fcGreenSoft(false), 14.0, 0.0, gui::clear());
+  addScText(e, "UI3 DESIGN ENGINE", 102.0, 134.0, 180.0, 18.0, 9.5, greenDark, 1);
+  addScText(e, "Design interfaces at native speed.", 80.0, 178.0, 620.0, 96.0, 40.0, navy, 1);
+  addScText(e, "Vector frames, live design tokens, and interactive prototypes in a single workspace.", 80.0, 290.0, 560.0, 44.0, 14.0, muted, 0);
+  addScButton(e, "Launch Workspace", 80.0, 356.0, 186.0, 46.0, green, navy);
+  addScButton(e, "Browse Kit", 282.0, 356.0, 154.0, 46.0, navy, fcWhite());
+
+  addScRect(e, "Hero Preview Card", 740.0, 124.0, 620.0, 380.0, fcDesignBg(false), 16.0, 1.0, line);
+  addScRect(e, "Preview Window", 768.0, 152.0, 564.0, 324.0, fcWhite(), 12.0, 1.0, line);
+  addScChart(e, "Hero Telemetry", 800.0, 188.0, 320.0, 220.0, fcChartGreen());
+  addScDonut(e, "Hero Mix", 1140.0, 188.0, 164.0, 220.0);
+
+  addScRect(e, "Feature 1 Card", 80.0, 560.0, 400.0, 290.0, fcDesignBg(false), 14.0, 1.0, line);
+  addScText(e, "01 · Vector Precision", 110.0, 594.0, 260.0, 26.0, 16.0, navy, 1);
+  addScText(e, "Snap frames, polygons, stars, and auto layouts effortlessly.", 110.0, 632.0, 340.0, 40.0, 11.5, muted, 0);
+  addScSpark(e, "Feature Spark 1", 110.0, 710.0, 330.0, 90.0, fcChartGreen(), 0);
+
+  addScRect(e, "Feature 2 Card", 520.0, 560.0, 400.0, 290.0, fcDesignBg(false), 14.0, 1.0, line);
+  addScText(e, "02 · Design Tokens", 550.0, 594.0, 260.0, 26.0, 16.0, navy, 1);
+  addScText(e, "Theme light and dark variables with one click across pages.", 550.0, 632.0, 340.0, 40.0, 11.5, muted, 0);
+  addScRect(e, "Swatch A", 550.0, 720.0, 72.0, 72.0, green, 12.0, 0.0, gui::clear());
+  addScRect(e, "Swatch B", 638.0, 720.0, 72.0, 72.0, navy, 12.0, 0.0, gui::clear());
+  addScRect(e, "Swatch C", 726.0, 720.0, 72.0, 72.0, fcChartBlue(), 12.0, 0.0, gui::clear());
+
+  addScRect(e, "Feature 3 Card", 960.0, 560.0, 400.0, 290.0, fcDesignBg(false), 14.0, 1.0, line);
+  addScText(e, "03 · Instant Prototypes", 990.0, 594.0, 260.0, 26.0, 16.0, navy, 1);
+  addScText(e, "Wire hotspots and present live flows right from your canvas.", 990.0, 632.0, 340.0, 40.0, 11.5, muted, 0);
+  addScLine(e, "Feature Line 3", 990.0, 706.0, 330.0, 100.0, fcChartBlue());
+}
+
+void populateWireframeScene(Editor* e) {
+  e.count = 0;
+  e.nextId = 900;
+  e.stageW = 1440.0;
+  e.stageH = 960.0;
+  e.stageBg = gui::rgb(248, 250, 252);
+  std::string::copy(&e.stageName[0], "Wireframe Kit - App Shell", 48);
+
+  Color wire = gui::rgb(203, 213, 225);
+  Color block = gui::rgb(226, 232, 240);
+  Color ink = gui::rgb(51, 65, 85);
+  Color white = fcWhite();
+
+  addScRect(e, "Wire Sidebar", 0.0, 0.0, 240.0, 960.0, block, 0.0, 1.0, wire);
+  addScRect(e, "Wire Logo", 24.0, 24.0, 140.0, 32.0, wire, 6.0, 0.0, gui::clear());
+  addScRect(e, "Nav Item 1", 24.0, 88.0, 192.0, 36.0, white, 6.0, 1.0, wire);
+  addScRect(e, "Nav Item 2", 24.0, 136.0, 192.0, 36.0, wire, 6.0, 0.0, gui::clear());
+  addScRect(e, "Nav Item 3", 24.0, 184.0, 192.0, 36.0, wire, 6.0, 0.0, gui::clear());
+
+  addScRect(e, "Wire Header", 272.0, 24.0, 1136.0, 64.0, white, 8.0, 1.0, wire);
+  addScText(e, "WIREFRAME / WORKSPACE", 296.0, 46.0, 280.0, 22.0, 13.0, ink, 1);
+  addScRect(e, "Search Input Slot", 920.0, 38.0, 260.0, 36.0, block, 18.0, 0.0, gui::clear());
+  addScRect(e, "Primary CTA Slot", 1200.0, 38.0, 180.0, 36.0, ink, 8.0, 0.0, gui::clear());
+
+  addNodeToEditor(e, NodeKind::NodeImage, "Hero Media Placeholder", "", 272.0, 116.0, 1136.0, 280.0,
+                  white, ink, wire, 10.0, 1.5, 0.0, 0);
+
+  addScRect(e, "Column Card A", 272.0, 424.0, 360.0, 480.0, white, 10.0, 1.0, wire);
+  addNodeToEditor(e, NodeKind::NodeImage, "Card Image A", "", 296.0, 448.0, 312.0, 180.0, block, ink, wire, 8.0, 1.0, 0.0, 0);
+  addScRect(e, "Text Line A1", 296.0, 652.0, 240.0, 18.0, wire, 4.0, 0.0, gui::clear());
+  addScRect(e, "Text Line A2", 296.0, 684.0, 180.0, 14.0, block, 4.0, 0.0, gui::clear());
+
+  addScRect(e, "Column Card B", 660.0, 424.0, 360.0, 480.0, white, 10.0, 1.0, wire);
+  addNodeToEditor(e, NodeKind::NodeImage, "Card Image B", "", 684.0, 448.0, 312.0, 180.0, block, ink, wire, 8.0, 1.0, 0.0, 0);
+  addScRect(e, "Text Line B1", 684.0, 652.0, 240.0, 18.0, wire, 4.0, 0.0, gui::clear());
+  addScRect(e, "Text Line B2", 684.0, 684.0, 180.0, 14.0, block, 4.0, 0.0, gui::clear());
+
+  addScRect(e, "Column Card C", 1048.0, 424.0, 360.0, 480.0, white, 10.0, 1.0, wire);
+  addNodeToEditor(e, NodeKind::NodeImage, "Card Image C", "", 1072.0, 448.0, 312.0, 180.0, block, ink, wire, 8.0, 1.0, 0.0, 0);
+  addScRect(e, "Text Line C1", 1072.0, 652.0, 240.0, 18.0, wire, 4.0, 0.0, gui::clear());
+  addScRect(e, "Text Line C2", 1072.0, 684.0, 180.0, 14.0, block, 4.0, 0.0, gui::clear());
+}
+
+void populateSocialSizesScene(Editor* e) {
+  e.count = 0;
+  e.nextId = 1000;
+  e.stageW = 1440.0;
+  e.stageH = 960.0;
+  e.stageBg = fcDesignBg(false);
+  std::string::copy(&e.stageName[0], "Social Post Sizes - Kit", 48);
+
+  Color navy = fcNavy();
+  Color green = fcGreen();
+  Color white = fcWhite();
+  Color blue = fcChartBlue();
+
+  addNodeToEditor(e, NodeKind::NodeFrame, "Instagram 1080x1080", "", 60.0, 80.0, 440.0, 440.0,
+                  navy, gui::clear(), fcDesignBorder(), 14.0, 1.5, 0.0, 0);
+  addNodeToEditor(e, NodeKind::NodeStar, "IG Spark Star", "", 96.0, 116.0, 56.0, 56.0,
+                  green, gui::clear(), green, 0.0, 2.0, 0.0, 0);
+  addScText(e, "Create Bold UI.", 96.0, 210.0, 340.0, 48.0, 28.0, white, 1);
+  addScButton(e, "Try FigCraft", 96.0, 430.0, 160.0, 42.0, green, navy);
+
+  addNodeToEditor(e, NodeKind::NodeFrame, "Story 1080x1920", "", 550.0, 80.0, 340.0, 680.0,
+                  fcChartGreen(), gui::clear(), fcDesignBorder(), 18.0, 1.5, 0.0, 0);
+  addScText(e, "DAILY RELEASE", 584.0, 124.0, 220.0, 22.0, 12.0, navy, 1);
+  addScText(e, "Vector Tools & Presets", 584.0, 170.0, 260.0, 64.0, 26.0, white, 1);
+  addNodeToEditor(e, NodeKind::NodeEllipse, "Story Emblem", "", 630.0, 300.0, 180.0, 180.0,
+                  navy, gui::clear(), white, 90.0, 3.0, 0.0, 0);
+  addScButton(e, "Swipe Up", 584.0, 684.0, 272.0, 42.0, white, navy);
+
+  addNodeToEditor(e, NodeKind::NodeFrame, "Banner 1200x628", "", 940.0, 80.0, 440.0, 250.0,
+                  white, gui::clear(), fcDesignBorder(), 12.0, 1.5, 0.0, 0);
+  addScText(e, "Design Systems 2.0", 974.0, 124.0, 320.0, 34.0, 22.0, navy, 1);
+  addScText(e, "Scale across web & mobile", 974.0, 168.0, 300.0, 24.0, 12.0, blue, 0);
+  addScSpark(e, "Banner Spark", 974.0, 220.0, 370.0, 72.0, green, 0);
+}
+
+void populatePresentationScene(Editor* e) {
+  e.count = 0;
+  e.nextId = 1100;
+  e.stageW = 1280.0;
+  e.stageH = 720.0;
+  e.stageBg = fcNavy();
+  std::string::copy(&e.stageName[0], "Presentation Slide 01", 48);
+
+  Color green = fcGreen();
+  Color white = fcWhite();
+  Color raised = fcNavyRaised();
+  Color muted = gui::rgb(148, 163, 184);
+
+  addScRect(e, "Accent Pill", 84.0, 84.0, 180.0, 32.0, fcGreenSoft(true), 16.0, 1.0, green);
+  addScText(e, "Q4 PRODUCT REVIEW", 104.0, 92.0, 150.0, 18.0, 9.5, green, 1);
+  addScText(e, "Ridgeline Studio Platform", 84.0, 154.0, 720.0, 60.0, 38.0, white, 1);
+  addScText(e, "Design systems, field analytics, and seasonal planning.", 84.0, 226.0, 620.0, 30.0, 15.0, muted, 0);
+
+  addScRect(e, "Slide KPI 1", 84.0, 320.0, 340.0, 240.0, raised, 14.0, 1.0, gui::rgb(45, 59, 82));
+  addScText(e, "ACTIVE TRAILS", 112.0, 348.0, 180.0, 18.0, 10.0, muted, 1);
+  addScText(e, "148", 112.0, 384.0, 200.0, 56.0, 40.0, green, 1);
+  addScSpark(e, "Slide Spark", 112.0, 466.0, 284.0, 64.0, green, 1);
+
+  addScRect(e, "Slide KPI 2", 464.0, 320.0, 340.0, 240.0, raised, 14.0, 1.0, gui::rgb(45, 59, 82));
+  addScText(e, "WEEKLY HIKERS", 492.0, 348.0, 180.0, 18.0, 10.0, muted, 1);
+  addScText(e, "12.4K", 492.0, 384.0, 220.0, 56.0, 40.0, white, 1);
+  addScChart(e, "Slide Bars", 492.0, 460.0, 284.0, 76.0, fcChartGreen());
+
+  addScRect(e, "Slide KPI 3", 844.0, 320.0, 352.0, 240.0, raised, 14.0, 1.0, gui::rgb(45, 59, 82));
+  addScText(e, "TRAIL MIX", 872.0, 348.0, 180.0, 18.0, 10.0, muted, 1);
+  addScDonut(e, "Slide Donut", 896.0, 376.0, 248.0, 168.0);
+  addScText(e, "01 / 12", 1140.0, 650.0, 80.0, 20.0, 11.0, muted, 0);
+}
+
+void populateIconSetScene(Editor* e) {
+  e.count = 0;
+  e.nextId = 1200;
+  e.stageW = 1200.0;
+  e.stageH = 800.0;
+  e.stageBg = fcWhite();
+  std::string::copy(&e.stageName[0], "Icon Set Starter - 24px", 48);
+
+  Color navy = fcNavy();
+  Color green = fcGreen();
+  Color blue = fcChartBlue();
+  Color warn = fcWarning();
+  Color card = fcDesignBg(false);
+  Color line = fcDesignBorder();
+
+  addScText(e, "Vector Icon Starter Sheet", 72.0, 56.0, 420.0, 36.0, 24.0, navy, 1);
+  addScText(e, "Built from primitive Vector, Polygon, Star, Ellipse, Line, and Arrow layers.", 72.0, 98.0, 620.0, 22.0, 11.5, fcTitleMuted(), 0);
+
+  // Row 1 tiles
+  addScRect(e, "Tile Star", 72.0, 156.0, 240.0, 240.0, card, 14.0, 1.0, line);
+  addNodeToEditor(e, NodeKind::NodeStar, "Star Icon", "", 142.0, 210.0, 100.0, 100.0, green, gui::clear(), fcGreenDark(), 0.0, 2.5, 0.0, 0);
+  addScText(e, "star-24", 160.0, 350.0, 90.0, 18.0, 10.5, navy, 1);
+
+  addScRect(e, "Tile Polygon", 344.0, 156.0, 240.0, 240.0, card, 14.0, 1.0, line);
+  addNodeToEditor(e, NodeKind::NodePolygon, "Hexagon Icon", "", 414.0, 210.0, 100.0, 100.0, blue, gui::clear(), blue, 0.0, 2.5, 0.0, 0);
+  addScText(e, "polygon-24", 422.0, 350.0, 100.0, 18.0, 10.5, navy, 1);
+
+  addScRect(e, "Tile Ellipse", 616.0, 156.0, 240.0, 240.0, card, 14.0, 1.0, line);
+  addNodeToEditor(e, NodeKind::NodeEllipse, "Circle Icon", "", 686.0, 210.0, 100.0, 100.0, fcGreenSoft(false), gui::clear(), green, 50.0, 3.0, 0.0, 0);
+  addScText(e, "circle-24", 700.0, 350.0, 90.0, 18.0, 10.5, navy, 1);
+
+  addScRect(e, "Tile Arrow", 888.0, 156.0, 240.0, 240.0, card, 14.0, 1.0, line);
+  addNodeToEditor(e, NodeKind::NodeArrow, "Arrow Icon", "", 948.0, 244.0, 120.0, 32.0, navy, gui::clear(), navy, 0.0, 3.0, 0.0, 0);
+  addScText(e, "arrow-24", 972.0, 350.0, 90.0, 18.0, 10.5, navy, 1);
+
+  // Row 2 tiles
+  addScRect(e, "Tile Vector", 72.0, 428.0, 240.0, 240.0, card, 14.0, 1.0, line);
+  addNodeToEditor(e, NodeKind::NodePen, "Diamond Node", "", 142.0, 482.0, 100.0, 100.0, green, gui::clear(), navy, 0.0, 2.0, 0.0, 0);
+  addScText(e, "vector-24", 156.0, 622.0, 90.0, 18.0, 10.5, navy, 1);
+
+  addScRect(e, "Tile Pencil", 344.0, 428.0, 240.0, 240.0, card, 14.0, 1.0, line);
+  addNodeToEditor(e, NodeKind::NodePencil, "Wave Stroke", "", 404.0, 496.0, 120.0, 72.0, warn, gui::clear(), warn, 0.0, 2.5, 0.0, 0);
+  addScText(e, "wave-24", 434.0, 622.0, 90.0, 18.0, 10.5, navy, 1);
+
+  addScRect(e, "Tile Image", 616.0, 428.0, 240.0, 240.0, card, 14.0, 1.0, line);
+  addNodeToEditor(e, NodeKind::NodeImage, "Media Icon", "", 686.0, 482.0, 100.0, 100.0, fcWhite(), navy, line, 10.0, 2.0, 0.0, 0);
+  addScText(e, "image-24", 702.0, 622.0, 90.0, 18.0, 10.5, navy, 1);
+
+  addScRect(e, "Tile Section", 888.0, 428.0, 240.0, 240.0, card, 14.0, 1.0, line);
+  addNodeToEditor(e, NodeKind::NodeSection, "Section Icon", "", 958.0, 492.0, 100.0, 90.0, fcGreenSoft(false), gui::clear(), green, 8.0, 1.5, 0.0, 0);
+  addScText(e, "section-24", 968.0, 622.0, 96.0, 18.0, 10.5, navy, 1);
+}
+
+void populateTemplateScene(Editor* e, int templateIdx) {
+  if (templateIdx == 0) { populateDashboardScene(e); }
+  else if (templateIdx == 1) { populateMobileAppScene(e); }
+  else if (templateIdx == 2) { populateLandingPageScene(e); }
+  else if (templateIdx == 3) { populateComponentsScene(e); }
+  else if (templateIdx == 4) { populateWireframeScene(e); }
+  else if (templateIdx == 5) { populateSocialSizesScene(e); }
+  else if (templateIdx == 6) { populatePresentationScene(e); }
+  else { populateIconSetScene(e); }
+  e.selected = -1;
+}
+
 void saveCurrentNodesToPage(Editor* e, int pageIdx) {
   if (pageIdx < 0 || pageIdx >= 4) { return; }
   PageData* pg = &e.pages[pageIdx];
-  copyStr(&pg.frameName[0], &e.stageName[0], 48);
+  std::string::copy(&pg.frameName[0], &e.stageName[0], 48);
   pg.frameW = e.stageW;
   pg.frameH = e.stageH;
   pg.frameBg = e.stageBg;
@@ -313,7 +663,7 @@ void saveCurrentNodesToPage(Editor* e, int pageIdx) {
 void loadPageNodesToEditor(Editor* e, int pageIdx) {
   if (pageIdx < 0 || pageIdx >= 4) { return; }
   PageData* pg = &e.pages[pageIdx];
-  copyStr(&e.stageName[0], &pg.frameName[0], 48);
+  std::string::copy(&e.stageName[0], &pg.frameName[0], 48);
   e.stageW = pg.frameW;
   e.stageH = pg.frameH;
   e.stageBg = pg.frameBg;
@@ -329,8 +679,8 @@ void savePageSlotToTab(Editor* e, int tabIdx, int pageIdx) {
   if (tabIdx < 0 || tabIdx >= 6 || pageIdx < 0 || pageIdx >= 4) { return; }
   PageData* src = &e.pages[pageIdx];
   PageData* dst = &e.tabs[tabIdx].pages[pageIdx];
-  copyStr(&dst.title[0], &src.title[0], 48);
-  copyStr(&dst.frameName[0], &src.frameName[0], 48);
+  std::string::copy(&dst.title[0], &src.title[0], 48);
+  std::string::copy(&dst.frameName[0], &src.frameName[0], 48);
   dst.frameW = src.frameW;
   dst.frameH = src.frameH;
   dst.frameBg = src.frameBg;
@@ -345,8 +695,8 @@ void loadPageSlotFromTab(Editor* e, int tabIdx, int pageIdx) {
   if (tabIdx < 0 || tabIdx >= 6 || pageIdx < 0 || pageIdx >= 4) { return; }
   PageData* src = &e.tabs[tabIdx].pages[pageIdx];
   PageData* dst = &e.pages[pageIdx];
-  copyStr(&dst.title[0], &src.title[0], 48);
-  copyStr(&dst.frameName[0], &src.frameName[0], 48);
+  std::string::copy(&dst.title[0], &src.title[0], 48);
+  std::string::copy(&dst.frameName[0], &src.frameName[0], 48);
   dst.frameW = src.frameW;
   dst.frameH = src.frameH;
   dst.frameBg = src.frameBg;
@@ -360,9 +710,9 @@ void loadPageSlotFromTab(Editor* e, int tabIdx, int pageIdx) {
 void addColorVar(Editor* e, const char* token, const char* group, const char* hex, Color c) {
   if (e.colorVarCount >= 8) { return; }
   ColorVar* v = &e.colorVars[e.colorVarCount];
-  copyStr(&v.token[0], token, 24);
-  copyStr(&v.group[0], group, 24);
-  copyStr(&v.hex[0], hex, 16);
+  std::string::copy(&v.token[0], token, 24);
+  std::string::copy(&v.group[0], group, 24);
+  std::string::copy(&v.hex[0], hex, 16);
   v.color = c;
   e.colorVarCount = e.colorVarCount + 1;
 }
@@ -370,10 +720,10 @@ void addColorVar(Editor* e, const char* token, const char* group, const char* he
 void addNumberVar(Editor* e, const char* token, const char* label, float val, const char* disp) {
   if (e.numberVarCount >= 4) { return; }
   NumberVar* v = &e.numberVars[e.numberVarCount];
-  copyStr(&v.token[0], token, 24);
-  copyStr(&v.label[0], label, 24);
+  std::string::copy(&v.token[0], token, 24);
+  std::string::copy(&v.label[0], label, 24);
   v.value = val;
-  copyStr(&v.display[0], disp, 12);
+  std::string::copy(&v.display[0], disp, 12);
   e.numberVarCount = e.numberVarCount + 1;
 }
 
@@ -381,9 +731,9 @@ void addInteractionRecord(Editor* e, int nodeId, const char* trigger, const char
   if (e.interactionCount >= 16) { return; }
   InteractionItem* it = &e.interactions[e.interactionCount];
   it.nodeId = nodeId;
-  copyStr(&it.trigger[0], trigger, 32);
-  copyStr(&it.action[0], action, 48);
-  copyStr(&it.animation[0], anim, 32);
+  std::string::copy(&it.trigger[0], trigger, 32);
+  std::string::copy(&it.action[0], action, 48);
+  std::string::copy(&it.animation[0], anim, 32);
   it.durationMs = ms;
   e.interactionCount = e.interactionCount + 1;
 }
@@ -391,34 +741,38 @@ void addInteractionRecord(Editor* e, int nodeId, const char* trigger, const char
 void initDefaultWorkspace(Editor* e) {
   resetEditorFields(e);
 
-  // Page 1 first ("Components"), then Page 0 ("Dashboard")
-  copyStr(&e.pages[1].title[0], "Components", 48);
-  populateComponentsScene(e);
-  saveCurrentNodesToPage(e, 1);
+  // Clean blank workspace at startup (no prebuilt designs)
+  e.count = 0;
+  e.nextId = 100;
+  e.selected = -1;
+  std::string::copy(&e.stageName[0], "Main Frame", 48);
+  e.stageW = 1440.0;
+  e.stageH = 960.0;
+  e.stageBg = fcWhite();
 
-  copyStr(&e.pages[0].title[0], "Dashboard", 48);
-  populateDashboardScene(e);
+  std::string::copy(&e.pages[0].title[0], "Page 1", 48);
   saveCurrentNodesToPage(e, 0);
 
   e.activePage = 0;
-  e.pageCount = 2;
+  e.pageCount = 1;
   e.selected = -1;
 
-  // Initial tab 0
+  // Initial blank tab
   e.tabCount = 1;
   e.activeTab = 0;
-  copyStr(&e.tabs[0].title[0], "Ridgeline Studio dashboard", 48);
+  std::string::copy(&e.tabs[0].title[0], "Untitled 1", 48);
   e.tabs[0].activePage = 0;
-  e.tabs[0].pageCount = 2;
+  e.tabs[0].pageCount = 1;
   e.tabs[0].selected = -1;
   e.tabs[0].zoom = 1.0;
   e.tabs[0].offsetX = 0.0;
   e.tabs[0].offsetY = 0.0;
   e.tabs[0].darkTheme = false;
+  e.tabs[0].dirty = false;
+  std::string::copy(&e.tabs[0].savedStatus[0], "Saved", 24);
   savePageSlotToTab(e, 0, 0);
-  savePageSlotToTab(e, 0, 1);
 
-  // Variables
+  // Workspace color & number tokens
   addColorVar(e, "surface", "Canvas", "F3F5F8", fcDesignBg(false));
   addColorVar(e, "text", "Ink", "0F1726", fcNavy());
   addColorVar(e, "accent", "Accent", "0ACF83", fcGreen());
@@ -429,8 +783,4 @@ void initDefaultWorkspace(Editor* e) {
   addNumberVar(e, "radius", "Corner", 20.0, "20");
   addNumberVar(e, "space", "Gap", 24.0, "24");
   addNumberVar(e, "card", "Card R", 9.0, "9");
-
-  // Prototype interactions
-  addInteractionRecord(e, -1, "On click", "Navigate to Components", "Smart animate", 300);
-  addInteractionRecord(e, 118, "On click", "Open Winter planner", "Dissolve", 200);
 }

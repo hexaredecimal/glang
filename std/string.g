@@ -1,9 +1,12 @@
 // Aggregate string module: `import std.string;`
 import std.string.prelude;
+import std.string.string;
+import std.string.buffer;
 import std.string.builder;
 import std.string.compare;
 import std.string.conv;
 import std.string.count;
+import std.string.clone;
 import std.string.dup;
 import std.string.len;
 import std.string.owned;

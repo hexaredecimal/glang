@@ -1,7 +1,7 @@
 import std.prelude;
 import std.container.pair;
 import std.container.list;
-
+import std.string.string;
 
 struct std::sequence {} // Module struct
 
@@ -13,9 +13,6 @@ struct Lazy<T> {}
 
 [[private, extern]]
 Lazy<T> __lazy_from_span<T>(T[] values);
-
-[[private, extern]]
-Lazy<T> __lazy_from_list<T>(List<T> values);
 
 [[private, extern]]
 Lazy<char> __lazy_from_cstr(const char* text);
@@ -63,7 +60,7 @@ Lazy<(A, B)> __lazy_zip<A, B>(Lazy<A> left, Lazy<B> right);
 Lazy<T> __lazy_chain<T>(Lazy<T> first, Lazy<T> second);
 
 [[private, extern]]
-List<T> __lazy_to_vector<T>(Lazy<T> source);
+(T*, int) __lazy_to_buffer<T>(Lazy<T> source);
 
 [[private, extern]]
 U __lazy_fold<T, U>(Lazy<T> source, U initial, U (*fn)(U, T));
@@ -105,11 +102,14 @@ void __lazy_for_each<T>(Lazy<T> source, void (*fn)(T));
 /// are copied into owned storage, so temporary array literals are safe.
 Lazy<T> to_lazy<T>(T[] elements) => __lazy_from_span(elements);
 
-/// Wrap a `List<T>` as a lazy sequence.
-Lazy<T> to_lazy<T>(List<T> elements) => __lazy_from_list(elements);
+/// Wrap a `List<T>` as a lazy sequence. The elements are copied.
+Lazy<T> to_lazy<T>(List<T> elements) => __lazy_from_span(elements.as_slice());
 
 /// Iterate the bytes of a C string lazily.
 Lazy<char> to_lazy(const char* text) => __lazy_from_cstr(text);
+
+/// Iterate the bytes of a String lazily.
+Lazy<char> to_lazy(String* text) => text.c_str().to_lazy();
 
 /// A lazy sequence is already lazy.
 Lazy<T> to_lazy<T>(Lazy<T> source) => source;
@@ -148,7 +148,13 @@ Lazy<(A, B)> zip<A, B>(Lazy<A> left, Lazy<B> right) => __lazy_zip(left, right);
 
 Lazy<T> chain<T>(Lazy<T> first, Lazy<T> second) => __lazy_chain(first, second);
 
-List<T> to_list<T>(Lazy<T> source) => __lazy_to_vector(source);
+/// Consume `source` into a new `List<T>`.
+List<T> to_list<T>(Lazy<T> source) {
+    auto (buffer, count) = __lazy_to_buffer(source);
+    return List<T>::from_buffer(buffer, count);
+}
+
+List<T> collect<T>(Lazy<T> source) => source.to_list();
 
 U fold<T, U>(Lazy<T> source, U initial, U (*fn)(U, T)) => __lazy_fold(source, initial, fn);
 

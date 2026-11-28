@@ -8,9 +8,9 @@ struct Meters {
   double val;
 }
 
-[userLiteral] Seconds s(double v) => Seconds{v}
-[userLiteral] Meters m(double v) => Meters{v}
-[userLiteral] uint u(int v) => v as uint;
+[user_literal] Seconds s(double v) => Seconds{v}
+[user_literal] Meters m(double v) => Meters{v}
+[user_literal] uint u(int v) => v as uint;
 
 void main() {
   Seconds sec = 5.5s;

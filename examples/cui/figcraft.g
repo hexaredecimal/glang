@@ -157,6 +157,331 @@ void toast(CuiCtx ui, const char* title, const char* description) {
   cui_toast_ex(ui, title, &opts);
 }
 
+void copyStr(char* dst, const char* src, int cap) {
+  if (dst == nullptr || cap <= 0) { return; }
+  if (src == nullptr) { dst[0] = '\0'; return; }
+  int i = 0;
+  while (src[i] != '\0' && i < cap - 1) {
+    dst[i] = src[i];
+    i = i + 1;
+  }
+  dst[i] = '\0';
+}
+
+void appendStr(char* dst, const char* src, int cap) {
+  if (dst == nullptr || src == nullptr || cap <= 0) { return; }
+  int len = 0;
+  while (dst[len] != '\0' && len < cap - 1) { len = len + 1; }
+  int i = 0;
+  while (src[i] != '\0' && len + i < cap - 1) {
+    dst[len + i] = src[i];
+    i = i + 1;
+  }
+  dst[len + i] = '\0';
+}
+
+char toLowerCh(char c) {
+  if (c >= 'A' && c <= 'Z') { return ((c as int) + 32) as char; }
+  return c;
+}
+
+bool containsFold(const char* hay, const char* needle) {
+  if (needle == nullptr || needle[0] == '\0') { return true; }
+  if (hay == nullptr) { return false; }
+  int hLen = 0;
+  while (hay[hLen] != '\0') { hLen = hLen + 1; }
+  int nLen = 0;
+  while (needle[nLen] != '\0') { nLen = nLen + 1; }
+  if (nLen > hLen) { return false; }
+  for (int i = 0; i <= hLen - nLen; i = i + 1) {
+    bool ok = true;
+    for (int j = 0; j < nLen; j = j + 1) {
+      if (toLowerCh(hay[i + j]) != toLowerCh(needle[j])) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok) { return true; }
+  }
+  return false;
+}
+
+// ---------------------------------------------------------------------------
+// Workspace state, tool groups, and placed canvas shapes
+// ---------------------------------------------------------------------------
+// Tool IDs:
+// 0 Move, 1 Frame, 2 Rect, 3 Pen, 4 Text, 5 Comment, 6 Actions,
+// 7 Hand, 8 Scale, 9 Section, 10 Slice, 11 Line, 12 Arrow, 13 Ellipse,
+// 14 Polygon, 15 Star, 16 Place Image, 17 Pencil, 18 Body Text, 19 Pill/Badge
+
+struct UserShape {
+  int toolKind;
+  float x;
+  float y;
+  float w;
+  float h;
+}
+
+struct MockTab {
+  char[48] title;
+  int templateIdx;
+  bool dirty;
+}
+
+struct FigState {
+  int leftTab;
+  int selectedPage;
+  int selectedLayer;
+  int rightTab;
+  int tool;
+  int[5] groupTool;
+  int openFlyout;
+  int bottomMode;
+  bool clipContent;
+  bool fillVisible;
+  bool showGrid;
+  bool outlineMode;
+  bool showActions;
+  bool showHelp;
+  bool showHome;
+  int homeTab;
+  bool homeGridView;
+  char[64] homeSearch;
+  bool showMainMenu;
+  bool showExitPrompt;
+  bool showSaveModal;
+  bool showExportModal;
+  int exportFormat;
+  char[48] saveAsName;
+  MockTab[6] tabs;
+  int tabCount;
+  int activeTab;
+  UserShape[48] shapes;
+  int shapeCount;
+  bool dragging;
+  float dragMouseX;
+  float dragMouseY;
+  float offsetX;
+  float offsetY;
+  bool creating;
+  float createStartX;
+  float createStartY;
+  float createCurX;
+  float createCurY;
+  float frameLeft;
+  float frameTop;
+  CuiRect mainMenuRect;
+  CuiRect starBtnRect;
+  CuiRect flyoutRect;
+  CuiRect toolbarRect;
+}
+
+void initFigState(FigState* s) {
+  s.leftTab = 0;
+  s.selectedPage = 0;
+  s.selectedLayer = 0;
+  s.rightTab = 0;
+  s.tool = 0;
+  s.groupTool[0] = 0;
+  s.groupTool[1] = 1;
+  s.groupTool[2] = 2;
+  s.groupTool[3] = 3;
+  s.groupTool[4] = 4;
+  s.openFlyout = -1;
+  s.bottomMode = 0;
+  s.clipContent = true;
+  s.fillVisible = true;
+  s.showGrid = false;
+  s.outlineMode = false;
+  s.showActions = false;
+  s.showHelp = false;
+  s.showHome = false;
+  s.homeTab = 0;
+  s.homeGridView = true;
+  s.homeSearch[0] = '\0';
+  s.showMainMenu = false;
+  s.showExitPrompt = false;
+  s.showSaveModal = false;
+  s.showExportModal = false;
+  s.exportFormat = 0;
+  copyStr(&s.saveAsName[0], "Ridgeline Studio copy", 48);
+  copyStr(&s.tabs[0].title[0], "Ridgeline Studio dashboard", 48);
+  s.tabs[0].templateIdx = 0;
+  s.tabs[0].dirty = false;
+  s.tabCount = 1;
+  s.activeTab = 0;
+  s.shapeCount = 0;
+  s.dragging = false;
+  s.dragMouseX = 0.0;
+  s.dragMouseY = 0.0;
+  s.offsetX = 0.0;
+  s.offsetY = 0.0;
+  s.creating = false;
+  s.createStartX = 0.0;
+  s.createStartY = 0.0;
+  s.createCurX = 0.0;
+  s.createCurY = 0.0;
+  s.frameLeft = 300.0;
+  s.frameTop = 76.0;
+  s.mainMenuRect = CuiRect{x: 0.0, y: 0.0, w: 0.0, h: 0.0};
+  s.starBtnRect = CuiRect{x: 0.0, y: 0.0, w: 0.0, h: 0.0};
+  s.flyoutRect = CuiRect{x: 0.0, y: 0.0, w: 0.0, h: 0.0};
+  s.toolbarRect = CuiRect{x: 0.0, y: 0.0, w: 0.0, h: 0.0};
+}
+
+bool anyUnsavedTab(FigState* s) {
+  for (int i = 0; i < s.tabCount; i = i + 1) {
+    if (s.tabs[i].dirty) { return true; }
+  }
+  return false;
+}
+
+void markActiveDirty(FigState* s) {
+  if (s.activeTab >= 0 && s.activeTab < s.tabCount) {
+    s.tabs[s.activeTab].dirty = true;
+  }
+}
+
+int toolGroupFor(int t) {
+  if (t == 0 || t == 7 || t == 8) { return 0; }
+  if (t == 1 || t == 9 || t == 10) { return 1; }
+  if (t == 2 || (t >= 11 && t <= 16)) { return 2; }
+  if (t == 3 || t == 17) { return 3; }
+  if (t == 4 || t == 18 || t == 19) { return 4; }
+  return -1;
+}
+
+const char* toolGlyphFor(int t) {
+  if (t == 0) { return std::cui::icons::move(); }
+  if (t == 7) { return std::cui::icons::compass(); }
+  if (t == 8) { return std::cui::icons::maximize(); }
+  if (t == 1) { return std::cui::icons::grid(); }
+  if (t == 9) { return std::cui::icons::box(); }
+  if (t == 10) { return std::cui::icons::target(); }
+  if (t == 2) { return std::cui::icons::square(); }
+  if (t == 11) { return std::cui::icons::minus(); }
+  if (t == 12) { return std::cui::icons::arrowRight(); }
+  if (t == 13) { return std::cui::icons::circle(); }
+  if (t == 14) { return std::cui::icons::layers(); }
+  if (t == 15) { return std::cui::icons::star(); }
+  if (t == 16) { return std::cui::icons::sparkles(); }
+  if (t == 3) { return std::cui::icons::pencil(); }
+  if (t == 17) { return std::cui::icons::activity(); }
+  if (t == 4) { return std::cui::icons::textTool(); }
+  if (t == 18) { return std::cui::icons::fileText(); }
+  if (t == 19) { return std::cui::icons::tag(); }
+  if (t == 5) { return std::cui::icons::message(); }
+  return std::cui::icons::zap();
+}
+
+const char* toolLabelFor(int t) {
+  if (t == 0) { return "Move"; }
+  if (t == 7) { return "Hand tool"; }
+  if (t == 8) { return "Scale"; }
+  if (t == 1) { return "Frame"; }
+  if (t == 9) { return "Section"; }
+  if (t == 10) { return "Slice"; }
+  if (t == 2) { return "Rectangle"; }
+  if (t == 11) { return "Line"; }
+  if (t == 12) { return "Arrow"; }
+  if (t == 13) { return "Ellipse"; }
+  if (t == 14) { return "Polygon"; }
+  if (t == 15) { return "Star"; }
+  if (t == 16) { return "Place image"; }
+  if (t == 3) { return "Pen"; }
+  if (t == 17) { return "Pencil"; }
+  if (t == 4) { return "Heading text"; }
+  if (t == 18) { return "Body text"; }
+  if (t == 19) { return "Pill / Label"; }
+  if (t == 5) { return "Comment"; }
+  return "Actions";
+}
+
+const char* toolShortcutFor(int t) {
+  if (t == 0) { return "V"; }
+  if (t == 7) { return "H"; }
+  if (t == 8) { return "Shift+K"; }
+  if (t == 1) { return "F"; }
+  if (t == 9) { return "Shift+S"; }
+  if (t == 10) { return "S"; }
+  if (t == 2) { return "R"; }
+  if (t == 11) { return "L"; }
+  if (t == 12) { return "Shift+L"; }
+  if (t == 13) { return "O"; }
+  if (t == 16) { return "I"; }
+  if (t == 3) { return "P"; }
+  if (t == 17) { return "Shift+P"; }
+  if (t == 4) { return "T"; }
+  if (t == 5) { return "C"; }
+  if (t == 6) { return "K"; }
+  return "";
+}
+
+const char* toolTipFor(int t) {
+  if (t == 0) { return "Move (V)"; }
+  if (t == 7) { return "Hand tool (H)"; }
+  if (t == 8) { return "Scale (Shift+K)"; }
+  if (t == 1) { return "Frame (F)"; }
+  if (t == 9) { return "Section (Shift+S)"; }
+  if (t == 10) { return "Slice (S)"; }
+  if (t == 2) { return "Rectangle (R)"; }
+  if (t == 11) { return "Line (L)"; }
+  if (t == 12) { return "Arrow (Shift+L)"; }
+  if (t == 13) { return "Ellipse (O)"; }
+  if (t == 14) { return "Polygon"; }
+  if (t == 15) { return "Star"; }
+  if (t == 16) { return "Place image (I)"; }
+  if (t == 3) { return "Pen (P)"; }
+  if (t == 17) { return "Pencil (Shift+P)"; }
+  if (t == 4) { return "Text (T)"; }
+  if (t == 18) { return "Body text"; }
+  if (t == 19) { return "Pill / Label"; }
+  if (t == 5) { return "Comment (C)"; }
+  return "Actions (K)";
+}
+
+void pickTool(FigState* s, int t) {
+  s.openFlyout = -1;
+  s.showMainMenu = false;
+  if (t == 6) {
+    s.showActions = !s.showActions;
+    return;
+  }
+  s.tool = t;
+  int grp = toolGroupFor(t);
+  if (grp >= 0 && grp < 5) {
+    s.groupTool[grp] = t;
+  }
+}
+
+void openNewTabInState(FigState* s, const char* title, int tmplIdx) {
+  s.showHome = false;
+  s.showMainMenu = false;
+  s.openFlyout = -1;
+  int idx = s.activeTab;
+  if (s.tabCount < 6) {
+    idx = s.tabCount;
+    s.tabCount = s.tabCount + 1;
+  }
+  s.activeTab = idx;
+  copyStr(&s.tabs[idx].title[0], title, 48);
+  s.tabs[idx].templateIdx = tmplIdx;
+  s.tabs[idx].dirty = false;
+  s.shapeCount = 0;
+  s.offsetX = 0.0;
+  s.offsetY = 0.0;
+}
+
+void requestExitApp(FigState* s, CuiApp app) {
+  s.showMainMenu = false;
+  s.openFlyout = -1;
+  if (anyUnsavedTab(s)) {
+    s.showExitPrompt = true;
+  } else {
+    cui_app_quit(app);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Shared controls
 // ---------------------------------------------------------------------------
@@ -227,7 +552,7 @@ void sectionDivider(CuiCtx ui) {
 // Top tab strip
 // ---------------------------------------------------------------------------
 
-void buildTopBar(CuiCtx ui, CuiApp app) {
+void buildTopBar(CuiCtx ui, CuiApp app, FigState* s) {
   CuiBox bar = CuiBox{
     width: std::cui::fill(),
     height: std::cui::px(50.0),
@@ -236,43 +561,81 @@ void buildTopBar(CuiCtx ui, CuiApp app) {
   };
   cui_row_begin(ui, &bar);
 
-  // Home button, in the square area above the rail.
+  // Home button, in the square area above the rail -> Start Page.
   CuiBox home = CuiBox{
     id: "home",
     width: std::cui::px(52.0),
     height: std::cui::fill(),
     align: CuiAlign::Center,
-    justify: CuiJustify::JustifyCenter
+    justify: CuiJustify::JustifyCenter,
+    bg: pickColor(s.showHome, cardColor(), std::cui::rgba(0, 0, 0, 0))
   };
   CuiId homeId = cui_box_begin(ui, &home);
-  icon(ui, std::cui::icons::home(), 17.0, textColor());
+  icon(ui, std::cui::icons::home(), 17.0, pickColor(s.showHome, greenDark(), textColor()));
   cui_box_end(ui);
+  if (hoverRect(ui, homeId)) {
+    cui_tooltip(ui, "Home (Start Page)");
+  }
   if (clickRect(ui, homeId)) {
-    toast(ui, "Home", "The FigCraft home screen is part of the full app.");
+    s.showHome = true;
+    s.showMainMenu = false;
+    s.openFlyout = -1;
   }
 
-  // Active file tab.
-  CuiBox tab = CuiBox{
-    width: std::cui::px(252.0),
-    height: std::cui::fill(),
-    pad_left: 12.0,
-    pad_right: 8.0,
-    gap: 8.0,
-    align: CuiAlign::Center,
-    bg: cardColor(),
-    border: 1.0,
-    border_color: dividerColor(),
-    radius_tl: 7.0,
-    radius_tr: 7.0
-  };
-  cui_row_begin(ui, &tab);
-  icon(ui, std::cui::icons::layers(), 14.0, greenDark());
-  text(ui, "Ridgeline Studio dashboard", 12.0, textColor(), 0);
-  cui_spacer(ui);
-  if (flatIcon(ui, std::cui::icons::x(), 13.0, mutedText(), "Close tab")) {
-    toast(ui, "Tab", "This mock keeps its one open file.");
+  // Document tabs.
+  for (int i = 0; i < s.tabCount; i = i + 1) {
+    bool isCur = !s.showHome && s.activeTab == i;
+    CuiBox tab = CuiBox{
+      width: std::cui::px(232.0),
+      height: std::cui::fill(),
+      pad_left: 12.0,
+      pad_right: 8.0,
+      gap: 7.0,
+      align: CuiAlign::Center,
+      bg: pickColor(isCur, cardColor(), std::cui::rgba(0, 0, 0, 0)),
+      border: pickFloat(isCur, 1.0, 0.0),
+      border_color: dividerColor(),
+      radius_tl: 7.0,
+      radius_tr: 7.0
+    };
+    CuiId tabId = cui_row_begin(ui, &tab);
+    icon(ui, std::cui::icons::layers(), 14.0, pickColor(isCur, greenDark(), mutedText()));
+    text(ui, &s.tabs[i].title[0], 11.5, pickColor(isCur, textColor(), secondaryText()), 0);
+    if (s.tabs[i].dirty) {
+      CuiBox dot = CuiBox{width: std::cui::px(6.0), height: std::cui::px(6.0), bg: warningColor(), radius: 3.0};
+      cui_box_begin(ui, &dot);
+      cui_box_end(ui);
+    }
+    cui_spacer(ui);
+    CuiBox closeTabBox = CuiBox{
+      width: std::cui::px(20.0),
+      height: std::cui::px(20.0),
+      align: CuiAlign::Center,
+      justify: CuiJustify::JustifyCenter,
+      radius: 5.0
+    };
+    CuiId closeTabId = cui_box_begin(ui, &closeTabBox);
+    icon(ui, std::cui::icons::x(), 12.0, mutedText());
+    cui_box_end(ui);
+    cui_box_end(ui);
+
+    if (clickRect(ui, closeTabId)) {
+      if (s.tabCount > 1) {
+        for (int j = i; j < s.tabCount - 1; j = j + 1) {
+          s.tabs[j] = s.tabs[j + 1];
+        }
+        s.tabCount = s.tabCount - 1;
+        if (s.activeTab >= s.tabCount) { s.activeTab = s.tabCount - 1; }
+      } else {
+        s.showHome = true;
+      }
+    } else if (clickRect(ui, tabId)) {
+      s.activeTab = i;
+      s.showHome = false;
+      s.showMainMenu = false;
+      s.openFlyout = -1;
+    }
   }
-  cui_box_end(ui);
 
   CuiBox tabTools = CuiBox{
     height: std::cui::fill(),
@@ -282,7 +645,7 @@ void buildTopBar(CuiCtx ui, CuiApp app) {
   };
   cui_row_begin(ui, &tabTools);
   if (flatIcon(ui, std::cui::icons::plus(), 15.0, secondaryText(), "New design file")) {
-    toast(ui, "New file", "New files open in another tab in the full app.");
+    openNewTabInState(s, "Untitled", 0);
   }
   cui_box_end(ui);
 
@@ -294,7 +657,7 @@ void buildTopBar(CuiCtx ui, CuiApp app) {
   };
   cui_row_begin(ui, &windowTools);
   if (flatIcon(ui, std::cui::icons::sun(), 15.0, secondaryText(), "Theme: light")) {
-    toast(ui, "Light theme", "This example is intentionally light.");
+    toast(ui, "Light theme", "Use the modular FigCraft Builder for live Dark/Light switching.");
   }
   if (flatIcon(ui, std::cui::icons::minus(), 15.0, secondaryText(), "Minimize")) {
     cui_app_minimize(app);
@@ -307,7 +670,7 @@ void buildTopBar(CuiCtx ui, CuiApp app) {
     }
   }
   if (flatIcon(ui, std::cui::icons::x(), 15.0, secondaryText(), "Close")) {
-    cui_app_quit(app);
+    requestExitApp(s, app);
   }
   cui_box_end(ui);
 
@@ -339,7 +702,7 @@ bool railItem(CuiCtx ui, const char* label, const char* glyph, bool selected) {
   return clicked;
 }
 
-void buildRail(CuiCtx ui, int* leftTab) {
+void buildRail(CuiCtx ui, FigState* s) {
   CuiBox rail = CuiBox{
     width: std::cui::px(52.0),
     height: std::cui::fill(),
@@ -354,16 +717,27 @@ void buildRail(CuiCtx ui, int* leftTab) {
   cui_column_begin(ui, &rail);
 
   CuiBox logo = CuiBox{
-    width: std::cui::px(27.0),
-    height: std::cui::px(27.0),
+    id: "star-menu-btn",
+    width: std::cui::px(30.0),
+    height: std::cui::px(30.0),
     align: CuiAlign::Center,
     justify: CuiJustify::JustifyCenter,
-    bg: greenSoft(),
+    bg: pickColor(s.showMainMenu, greenColor(), greenSoft()),
+    border: pickFloat(s.showMainMenu, 1.5, 1.0),
+    border_color: pickColor(s.showMainMenu, greenDark(), greenBorder()),
     radius: 8.0
   };
-  cui_box_begin(ui, &logo);
-  icon(ui, std::cui::icons::star(), 14.0, greenDark());
+  CuiId logoId = cui_box_begin(ui, &logo);
+  icon(ui, std::cui::icons::star(), 14.0, pickColor(s.showMainMenu, navyColor(), greenDark()));
   cui_box_end(ui);
+  s.starBtnRect = cui_get_rect(ui, logoId);
+  if (hoverRect(ui, logoId)) {
+    cui_tooltip(ui, "FigCraft menu");
+  }
+  if (clickRect(ui, logoId)) {
+    s.showMainMenu = !s.showMainMenu;
+    s.openFlyout = -1;
+  }
 
   CuiBox logoGap = CuiBox{
     width: std::cui::fill(),
@@ -376,13 +750,13 @@ void buildRail(CuiCtx ui, int* leftTab) {
   cui_box_end(ui);
   cui_box_end(ui);
 
-  if (railItem(ui, "File", std::cui::icons::file(), *leftTab == 0)) { *leftTab = 0; }
-  if (railItem(ui, "Assets", std::cui::icons::grid(), *leftTab == 1)) { *leftTab = 1; }
-  if (railItem(ui, "Variables", std::cui::icons::sliders(), *leftTab == 2)) { *leftTab = 2; }
+  if (railItem(ui, "File", std::cui::icons::file(), s.leftTab == 0)) { s.leftTab = 0; }
+  if (railItem(ui, "Assets", std::cui::icons::grid(), s.leftTab == 1)) { s.leftTab = 1; }
+  if (railItem(ui, "Variables", std::cui::icons::sliders(), s.leftTab == 2)) { s.leftTab = 2; }
 
   cui_spacer(ui);
-  if (flatIcon(ui, std::cui::icons::help(), 15.0, mutedText(), "Help")) {
-    toast(ui, "Getting started", "Draw a frame, add a layer, pick a tool.");
+  if (flatIcon(ui, std::cui::icons::help(), 15.0, mutedText(), "Shortcuts & Help")) {
+    s.showHelp = !s.showHelp;
   }
 
   cui_box_end(ui);
@@ -1424,22 +1798,185 @@ void drawCanvasSelection(CuiCtx ui, CuiRect frame) {
   selectionHandle(ui, r, cy);
 }
 
+void drawShapeItem(CuiCtx ui, CuiRect frame, UserShape* sh) {
+  float x = frame.x + sh.x;
+  float y = frame.y + sh.y;
+  float w = sh.w;
+  float h = sh.h;
+  CuiCorners r0 = CuiCorners{tl: 0.0, tr: 0.0, br: 0.0, bl: 0.0};
+  CuiCorners r8 = CuiCorners{tl: 8.0, tr: 8.0, br: 8.0, bl: 8.0};
+
+  if (sh.toolKind == 1) {
+    cui_draw_rect_border(ui, CuiRect{x: x, y: y, w: w, h: h}, CuiCorners{tl: 6.0, tr: 6.0, br: 6.0, bl: 6.0},
+                         cardColor(), borderColor(), 1.5);
+    cui_draw_text(ui, CuiFont::FontMedium, 10.0, CuiVec2{x: x + 4.0, y: y - 14.0}, greenDark(), "Frame", -1);
+  } else if (sh.toolKind == 9) {
+    cui_draw_rect_border(ui, CuiRect{x: x, y: y, w: w, h: h}, r8, greenSoft(), greenColor(), 1.5);
+    cui_draw_text(ui, CuiFont::FontMedium, 10.0, CuiVec2{x: x + 8.0, y: y + 8.0}, greenDark(), "Section", -1);
+  } else if (sh.toolKind == 10) {
+    cui_draw_rect_border(ui, CuiRect{x: x, y: y, w: w, h: h}, r0, std::cui::rgba(59, 130, 246, 20), chartBlue(), 1.5);
+    cui_draw_text(ui, CuiFont::FontMono, 9.0, CuiVec2{x: x + 6.0, y: y + 6.0}, chartBlue(), "Slice", -1);
+  } else if (sh.toolKind == 11) {
+    cui_draw_line(ui, CuiVec2{x: x, y: y + h * 0.5}, CuiVec2{x: x + w, y: y + h * 0.5}, 2.5, navyColor());
+  } else if (sh.toolKind == 12) {
+    float cy = y + h * 0.5;
+    float x1 = x + w;
+    cui_draw_line(ui, CuiVec2{x: x, y: cy}, CuiVec2{x: x1, y: cy}, 2.5, greenDark());
+    cui_draw_line(ui, CuiVec2{x: x1, y: cy}, CuiVec2{x: x1 - 10.0, y: cy - 7.0}, 2.5, greenDark());
+    cui_draw_line(ui, CuiVec2{x: x1, y: cy}, CuiVec2{x: x1 - 10.0, y: cy + 7.0}, 2.5, greenDark());
+  } else if (sh.toolKind == 13) {
+    float rad = w * 0.5;
+    if (h * 0.5 > rad) { rad = h * 0.5; }
+    cui_draw_rect(ui, CuiRect{x: x, y: y, w: w, h: h}, CuiCorners{tl: rad, tr: rad, br: rad, bl: rad}, chartBlue());
+  } else if (sh.toolKind == 14) {
+    float cx = x + w * 0.5;
+    float y1 = y + h * 0.25;
+    float y2 = y + h * 0.75;
+    cui_draw_rect(ui, CuiRect{x: x + w * 0.16, y: y + h * 0.16, w: w * 0.68, h: h * 0.68}, r8, std::cui::rgba(124, 77, 255, 48));
+    cui_draw_line(ui, CuiVec2{x: cx, y: y}, CuiVec2{x: x + w * 0.92, y: y1}, 2.0, purpleColor());
+    cui_draw_line(ui, CuiVec2{x: x + w * 0.92, y: y1}, CuiVec2{x: x + w * 0.92, y: y2}, 2.0, purpleColor());
+    cui_draw_line(ui, CuiVec2{x: x + w * 0.92, y: y2}, CuiVec2{x: cx, y: y + h}, 2.0, purpleColor());
+    cui_draw_line(ui, CuiVec2{x: cx, y: y + h}, CuiVec2{x: x + w * 0.08, y: y2}, 2.0, purpleColor());
+    cui_draw_line(ui, CuiVec2{x: x + w * 0.08, y: y2}, CuiVec2{x: x + w * 0.08, y: y1}, 2.0, purpleColor());
+    cui_draw_line(ui, CuiVec2{x: x + w * 0.08, y: y1}, CuiVec2{x: cx, y: y}, 2.0, purpleColor());
+  } else if (sh.toolKind == 15) {
+    float cx = x + w * 0.5;
+    float cy = y + h * 0.5;
+    cui_draw_rect(ui, CuiRect{x: cx - w * 0.2, y: cy - h * 0.2, w: w * 0.4, h: h * 0.4}, CuiCorners{tl: 16.0, tr: 16.0, br: 16.0, bl: 16.0}, std::cui::rgba(217, 145, 38, 70));
+    cui_draw_line(ui, CuiVec2{x: cx, y: y}, CuiVec2{x: x + w * 0.64, y: y + h * 0.36}, 2.0, warningColor());
+    cui_draw_line(ui, CuiVec2{x: x + w * 0.64, y: y + h * 0.36}, CuiVec2{x: x + w, y: y + h * 0.38}, 2.0, warningColor());
+    cui_draw_line(ui, CuiVec2{x: x + w, y: y + h * 0.38}, CuiVec2{x: x + w * 0.72, y: y + h * 0.62}, 2.0, warningColor());
+    cui_draw_line(ui, CuiVec2{x: x + w * 0.72, y: y + h * 0.62}, CuiVec2{x: x + w * 0.82, y: y + h}, 2.0, warningColor());
+    cui_draw_line(ui, CuiVec2{x: x + w * 0.82, y: y + h}, CuiVec2{x: cx, y: y + h * 0.76}, 2.0, warningColor());
+    cui_draw_line(ui, CuiVec2{x: cx, y: y + h * 0.76}, CuiVec2{x: x + w * 0.18, y: y + h}, 2.0, warningColor());
+    cui_draw_line(ui, CuiVec2{x: x + w * 0.18, y: y + h}, CuiVec2{x: x + w * 0.28, y: y + h * 0.62}, 2.0, warningColor());
+    cui_draw_line(ui, CuiVec2{x: x + w * 0.28, y: y + h * 0.62}, CuiVec2{x: x, y: y + h * 0.38}, 2.0, warningColor());
+    cui_draw_line(ui, CuiVec2{x: x, y: y + h * 0.38}, CuiVec2{x: x + w * 0.36, y: y + h * 0.36}, 2.0, warningColor());
+    cui_draw_line(ui, CuiVec2{x: x + w * 0.36, y: y + h * 0.36}, CuiVec2{x: cx, y: y}, 2.0, warningColor());
+  } else if (sh.toolKind == 16) {
+    cui_draw_rect_border(ui, CuiRect{x: x, y: y, w: w, h: h}, r8, cardColor(), borderColor(), 1.5);
+    cui_draw_line(ui, CuiVec2{x: x + 10.0, y: y + h - 12.0}, CuiVec2{x: x + w * 0.42, y: y + h * 0.42}, 2.0, chartGreen());
+    cui_draw_line(ui, CuiVec2{x: x + w * 0.42, y: y + h * 0.42}, CuiVec2{x: x + w * 0.65, y: y + h * 0.68}, 2.0, chartGreen());
+    cui_draw_line(ui, CuiVec2{x: x + w * 0.56, y: y + h * 0.60}, CuiVec2{x: x + w * 0.78, y: y + h * 0.35}, 2.0, chartMint());
+    cui_draw_line(ui, CuiVec2{x: x + w * 0.78, y: y + h * 0.35}, CuiVec2{x: x + w - 10.0, y: y + h - 12.0}, 2.0, chartMint());
+  } else if (sh.toolKind == 3) {
+    float cx = x + w * 0.5;
+    float cy = y + h * 0.5;
+    cui_draw_line(ui, CuiVec2{x: cx, y: y}, CuiVec2{x: x + w, y: cy}, 2.0, greenColor());
+    cui_draw_line(ui, CuiVec2{x: x + w, y: cy}, CuiVec2{x: cx, y: y + h}, 2.0, greenColor());
+    cui_draw_line(ui, CuiVec2{x: cx, y: y + h}, CuiVec2{x: x, y: cy}, 2.0, greenColor());
+    cui_draw_line(ui, CuiVec2{x: x, y: cy}, CuiVec2{x: cx, y: y}, 2.0, greenColor());
+  } else if (sh.toolKind == 17) {
+    float step = w / 4.0;
+    cui_draw_line(ui, CuiVec2{x: x, y: y + h * 0.7}, CuiVec2{x: x + step, y: y + h * 0.25}, 2.5, chartGreen());
+    cui_draw_line(ui, CuiVec2{x: x + step, y: y + h * 0.25}, CuiVec2{x: x + step * 2.0, y: y + h * 0.75}, 2.5, chartGreen());
+    cui_draw_line(ui, CuiVec2{x: x + step * 2.0, y: y + h * 0.75}, CuiVec2{x: x + step * 3.0, y: y + h * 0.25}, 2.5, chartGreen());
+    cui_draw_line(ui, CuiVec2{x: x + step * 3.0, y: y + h * 0.25}, CuiVec2{x: x + w, y: y + h * 0.55}, 2.5, chartGreen());
+  } else if (sh.toolKind == 4) {
+    cui_draw_text(ui, CuiFont::FontMedium, 18.0, CuiVec2{x: x, y: y}, navyColor(), "Heading Text", -1);
+  } else if (sh.toolKind == 18) {
+    cui_draw_text(ui, CuiFont::FontBody, 11.5, CuiVec2{x: x, y: y}, secondaryText(), "Body copy specification note.", -1);
+  } else if (sh.toolKind == 19) {
+    cui_draw_rect(ui, CuiRect{x: x, y: y, w: w, h: h}, CuiCorners{tl: 15.0, tr: 15.0, br: 15.0, bl: 15.0}, greenColor());
+    cui_draw_text(ui, CuiFont::FontMedium, 11.0, CuiVec2{x: x + 16.0, y: y + 7.0}, navyColor(), "Status Pill", -1);
+  } else if (sh.toolKind == 5) {
+    cui_draw_rect_border(ui, CuiRect{x: x, y: y, w: w, h: h}, r8, navyColor(), greenColor(), 1.5);
+    cui_draw_text(ui, CuiFont::FontMedium, 10.0, CuiVec2{x: x + 10.0, y: y + 7.0}, cardColor(), "Review note", -1);
+  } else {
+    cui_draw_rect(ui, CuiRect{x: x, y: y, w: w, h: h}, r8, greenColor());
+  }
+}
+
 void paintSelection(CuiCtx ui, CuiRect rect, void* user) {
-  drawCanvasSelection(ui, rect);
+  FigState* s = user as FigState*;
+  if (s != nullptr) {
+    if (s.showGrid) {
+      float colW = rect.w / 12.0;
+      for (int c = 0; c < 12; c = c + 1) {
+        cui_draw_rect(ui, CuiRect{x: rect.x + (c as float) * colW + 4.0, y: rect.y, w: colW - 8.0, h: rect.h},
+                      CuiCorners{tl: 0.0, tr: 0.0, br: 0.0, bl: 0.0}, std::cui::rgba(239, 68, 68, 20));
+      }
+    }
+    if (s.outlineMode) {
+      cui_draw_rect_border(ui, CuiRect{x: rect.x + 2.0, y: rect.y + 2.0, w: rect.w - 4.0, h: rect.h - 4.0},
+                           CuiCorners{tl: 0.0, tr: 0.0, br: 0.0, bl: 0.0},
+                           std::cui::rgba(0, 0, 0, 0), chartBlue(), 1.0);
+    }
+    for (int i = 0; i < s.shapeCount; i = i + 1) {
+      drawShapeItem(ui, rect, &s.shapes[i]);
+    }
+    if (s.creating) {
+      float rx0 = s.createStartX;
+      float rx1 = s.createCurX;
+      if (rx1 < rx0) { float tmp = rx0; rx0 = rx1; rx1 = tmp; }
+      float ry0 = s.createStartY;
+      float ry1 = s.createCurY;
+      if (ry1 < ry0) { float tmp = ry0; ry0 = ry1; ry1 = tmp; }
+      cui_draw_rect_border(ui, CuiRect{x: rect.x + rx0, y: rect.y + ry0, w: rx1 - rx0, h: ry1 - ry0},
+                           CuiCorners{tl: 4.0, tr: 4.0, br: 4.0, bl: 4.0},
+                           std::cui::rgba(10, 207, 131, 32), greenColor(), 1.5);
+    }
+  }
+  if (s == nullptr || s.selectedLayer == 0) {
+    drawCanvasSelection(ui, rect);
+  }
 }
 
-void handleShortcuts(CuiCtx ui, int* tool) {
-  if (cui_key_pressed(ui, CuiKey::KeyV)) { *tool = 0; }
-  if (cui_key_pressed(ui, CuiKey::KeyF)) { *tool = 1; }
-  if (cui_key_pressed(ui, CuiKey::KeyR)) { *tool = 2; }
-  if (cui_key_pressed(ui, CuiKey::KeyP)) { *tool = 3; }
-  if (cui_key_pressed(ui, CuiKey::KeyT)) { *tool = 4; }
-  if (cui_key_pressed(ui, CuiKey::KeyC)) { *tool = 5; }
-  if (cui_key_pressed(ui, CuiKey::KeyK)) { *tool = 6; }
+void handleShortcuts(CuiCtx ui, FigState* s) {
+  if (cui_wants_keyboard(ui)) { return; }
+  if (cui_key_pressed(ui, CuiKey::KeyEscape)) {
+    if (s.showExitPrompt) { s.showExitPrompt = false; }
+    else if (s.showSaveModal) { s.showSaveModal = false; }
+    else if (s.showExportModal) { s.showExportModal = false; }
+    else if (s.showMainMenu) { s.showMainMenu = false; }
+    else if (s.openFlyout >= 0) { s.openFlyout = -1; }
+    else if (s.showHelp) { s.showHelp = false; }
+    else if (s.showActions) { s.showActions = false; }
+    else { pickTool(s, 0); }
+    return;
+  }
+  if (s.showHome || s.showExitPrompt || s.showSaveModal || s.showExportModal) { return; }
+  if (cui_key_pressed(ui, CuiKey::KeyV)) { pickTool(s, 0); }
+  if (cui_key_pressed(ui, CuiKey::KeyH)) { pickTool(s, 7); }
+  if (cui_key_pressed(ui, CuiKey::KeyF)) { pickTool(s, 1); }
+  if (cui_key_pressed(ui, CuiKey::KeyS)) { pickTool(s, 10); }
+  if (cui_key_pressed(ui, CuiKey::KeyR)) { pickTool(s, 2); }
+  if (cui_key_pressed(ui, CuiKey::KeyL)) { pickTool(s, 11); }
+  if (cui_key_pressed(ui, CuiKey::KeyO)) { pickTool(s, 13); }
+  if (cui_key_pressed(ui, CuiKey::KeyI)) { pickTool(s, 16); }
+  if (cui_key_pressed(ui, CuiKey::KeyP)) { pickTool(s, 3); }
+  if (cui_key_pressed(ui, CuiKey::KeyT)) { pickTool(s, 4); }
+  if (cui_key_pressed(ui, CuiKey::KeyC)) { pickTool(s, 5); }
+  if (cui_key_pressed(ui, CuiKey::KeyK)) { s.showActions = !s.showActions; }
+  if (cui_key_pressed(ui, CuiKey::KeyG)) { s.showGrid = !s.showGrid; }
 }
 
-void toolButton(CuiCtx ui, const char* glyph, int index, int* tool, const char* tip) {
-  bool selected = *tool == index;
+void toolGroupButton(CuiCtx ui, int groupIdx, FigState* s) {
+  int curTool = s.groupTool[groupIdx];
+  bool selected = toolGroupFor(s.tool) == groupIdx;
+  const char* tip = toolTipFor(curTool);
+  CuiBox button = CuiBox{
+    id: tip,
+    width: std::cui::px(27.0),
+    height: std::cui::px(27.0),
+    align: CuiAlign::Center,
+    justify: CuiJustify::JustifyCenter,
+    bg: pickColor(selected, greenColor(), std::cui::rgba(0, 0, 0, 0)),
+    radius: 6.0
+  };
+  CuiId id = cui_box_begin(ui, &button);
+  icon(ui, toolGlyphFor(curTool), 14.0, pickColor(selected, navyColor(), secondaryText()));
+  cui_box_end(ui);
+  if (hoverRect(ui, id)) {
+    cui_tooltip(ui, tip);
+  }
+  if (clickRect(ui, id)) {
+    pickTool(s, curTool);
+  }
+}
+
+void toolButton(CuiCtx ui, const char* glyph, int index, FigState* s, const char* tip) {
+  bool selected = (s.tool == index) || (index == 6 && s.showActions);
   CuiBox button = CuiBox{
     id: tip,
     width: std::cui::px(27.0),
@@ -1456,24 +1993,136 @@ void toolButton(CuiCtx ui, const char* glyph, int index, int* tool, const char* 
     cui_tooltip(ui, tip);
   }
   if (clickRect(ui, id)) {
-    *tool = index;
+    pickTool(s, index);
   }
 }
 
-void flyoutMark(CuiCtx ui) {
+void flyoutMark(CuiCtx ui, const char* idName, int groupIdx, FigState* s) {
+  bool open = s.openFlyout == groupIdx;
   CuiBox mark = CuiBox{
-    width: std::cui::px(16.0),
+    id: idName,
+    width: std::cui::px(15.0),
     height: std::cui::px(27.0),
+    align: CuiAlign::Center,
+    justify: CuiJustify::JustifyCenter,
+    bg: pickColor(open, greenSoft(), std::cui::rgba(0, 0, 0, 0)),
+    radius: 4.0
+  };
+  CuiId id = cui_box_begin(ui, &mark);
+  icon(ui, std::cui::icons::chevronDown(), 9.5, pickColor(open, greenDark(), mutedText()));
+  cui_box_end(ui);
+  if (hoverRect(ui, id)) {
+    cui_tooltip(ui, "More tools");
+  }
+  if (clickRect(ui, id)) {
+    s.openFlyout = pickFloat(open, -1.0, groupIdx as float) as int;
+    s.showMainMenu = false;
+    s.showActions = false;
+  }
+}
+
+void flyoutSubItem(CuiCtx ui, int toolIdx, FigState* s) {
+  bool active = s.tool == toolIdx;
+  CuiBox row = CuiBox{
+    id: toolLabelFor(toolIdx),
+    width: std::cui::fill(),
+    height: std::cui::px(29.0),
+    pad_left: 8.0,
+    pad_right: 8.0,
+    gap: 8.0,
+    align: CuiAlign::Center,
+    bg: pickColor(active, greenSoft(), std::cui::rgba(0, 0, 0, 0)),
+    radius: 6.0
+  };
+  CuiId id = cui_row_begin(ui, &row);
+  CuiBox chk = CuiBox{width: std::cui::px(12.0), height: std::cui::px(12.0), align: CuiAlign::Center, justify: CuiJustify::JustifyCenter};
+  cui_box_begin(ui, &chk);
+  if (active) {
+    icon(ui, std::cui::icons::check(), 10.5, greenDark());
+  }
+  cui_box_end(ui);
+  icon(ui, toolGlyphFor(toolIdx), 13.0, pickColor(active, greenDark(), textColor()));
+  text(ui, toolLabelFor(toolIdx), 11.0, pickColor(active, textColor(), secondaryText()), 0);
+  cui_spacer(ui);
+  const char* sc = toolShortcutFor(toolIdx);
+  if (sc[0] != '\0') {
+    text(ui, sc, 9.5, mutedText(), 3);
+  }
+  cui_box_end(ui);
+  if (clickRect(ui, id)) {
+    pickTool(s, toolIdx);
+  }
+}
+
+void buildToolFlyoutOverlay(CuiCtx ui, FigState* s) {
+  int g = s.openFlyout;
+  if (g < 0 || g > 4) { return; }
+
+  float leftOff = 0.0;
+  float rightOff = 0.0;
+  if (g == 0) { rightOff = 154.0; }
+  else if (g == 1) { rightOff = 70.0; }
+  else if (g == 2) { leftOff = 14.0; }
+  else if (g == 3) { leftOff = 98.0; }
+  else { leftOff = 182.0; }
+
+  CuiBox wrap = CuiBox{
+    width: std::cui::fill(),
+    height: std::cui::fit(),
+    pad_left: leftOff,
+    pad_right: rightOff,
     align: CuiAlign::Center,
     justify: CuiJustify::JustifyCenter
   };
-  cui_box_begin(ui, &mark);
-  icon(ui, std::cui::icons::chevronDown(), 10.0, mutedText());
+  cui_row_begin(ui, &wrap);
+
+  CuiBox card = CuiBox{
+    id: "tool-flyout-card",
+    width: std::cui::px(210.0),
+    height: std::cui::fit(),
+    pad: 6.0,
+    gap: 2.0,
+    bg: cardColor(),
+    border: 1.0,
+    border_color: dividerColor(),
+    radius: 10.0,
+    elevation: CuiElevation::Floating
+  };
+  CuiId flyId = cui_column_begin(ui, &card);
+
+  if (g == 0) {
+    flyoutSubItem(ui, 0, s);
+    flyoutSubItem(ui, 7, s);
+    flyoutSubItem(ui, 8, s);
+  } else if (g == 1) {
+    flyoutSubItem(ui, 1, s);
+    flyoutSubItem(ui, 9, s);
+    flyoutSubItem(ui, 10, s);
+  } else if (g == 2) {
+    flyoutSubItem(ui, 2, s);
+    flyoutSubItem(ui, 11, s);
+    flyoutSubItem(ui, 12, s);
+    flyoutSubItem(ui, 13, s);
+    flyoutSubItem(ui, 14, s);
+    flyoutSubItem(ui, 15, s);
+    horizontalLine(ui, dividerColor());
+    flyoutSubItem(ui, 16, s);
+  } else if (g == 3) {
+    flyoutSubItem(ui, 3, s);
+    flyoutSubItem(ui, 17, s);
+  } else {
+    flyoutSubItem(ui, 4, s);
+    flyoutSubItem(ui, 18, s);
+    flyoutSubItem(ui, 19, s);
+  }
+
+  cui_box_end(ui);
+  s.flyoutRect = cui_get_rect(ui, flyId);
   cui_box_end(ui);
 }
 
-void modeButton(CuiCtx ui, const char* glyph, int index, int* mode, const char* tip) {
-  bool selected = *mode == index;
+void modeButton(CuiCtx ui, const char* glyph, int index, FigState* s, const char* tip) {
+  bool selected = s.bottomMode == index;
   CuiBox wrap = CuiBox{
     id: tip,
     width: std::cui::px(28.0),
@@ -1492,25 +2141,60 @@ void modeButton(CuiCtx ui, const char* glyph, int index, int* mode, const char* 
     cui_tooltip(ui, tip);
   }
   if (clickRect(ui, id)) {
-    *mode = index;
+    s.bottomMode = index;
+    if (index == 1) { s.showGrid = true; }
+    else if (index == 0) { s.showGrid = false; }
   }
 }
 
-void buildBottomToolbar(CuiCtx ui, int* tool, int* bottomMode) {
+void buildBottomToolbar(CuiCtx ui, FigState* s) {
   CuiBox strip = CuiBox{
     width: std::cui::fill(),
-    height: std::cui::px(64.0),
+    height: std::cui::fit(),
+    pad_bottom: 10.0,
+    gap: 6.0,
     align: CuiAlign::Center,
-    justify: CuiJustify::JustifyCenter,
+    justify: CuiJustify::JustifyEnd,
     bg: canvasColor()
   };
-  cui_row_begin(ui, &strip);
+  cui_column_begin(ui, &strip);
+
+  if (s.showActions) {
+    CuiBox qbar = CuiBox{
+      width: std::cui::fit(),
+      height: std::cui::px(36.0),
+      pad_left: 10.0,
+      pad_right: 10.0,
+      gap: 6.0,
+      align: CuiAlign::Center,
+      bg: cardColor(),
+      border: 1.0,
+      border_color: greenColor(),
+      radius: 10.0,
+      elevation: CuiElevation::Floating
+    };
+    cui_row_begin(ui, &qbar);
+    icon(ui, std::cui::icons::zap(), 12.5, greenDark());
+    if (flatIcon(ui, std::cui::icons::grid(), 13.0, secondaryText(), "Toggle layout grid")) { s.showGrid = !s.showGrid; }
+    if (flatIcon(ui, std::cui::icons::box(), 13.0, secondaryText(), "Wireframe outline")) { s.outlineMode = !s.outlineMode; }
+    if (flatIcon(ui, std::cui::icons::rotateCcw(), 13.0, secondaryText(), "Reset canvas view")) {
+      s.offsetX = 0.0;
+      s.offsetY = 0.0;
+    }
+    if (flatIcon(ui, std::cui::icons::x(), 12.0, mutedText(), "Close quick actions")) { s.showActions = false; }
+    cui_box_end(ui);
+  }
+
+  if (s.openFlyout >= 0) {
+    buildToolFlyoutOverlay(ui, s);
+  }
 
   CuiBox toolbar = CuiBox{
+    id: "bottom-toolbar-box",
     width: std::cui::fit(),
     height: std::cui::px(45.0),
-    pad_left: 6.0,
-    pad_right: 6.0,
+    pad_left: 8.0,
+    pad_right: 8.0,
     gap: 1.0,
     align: CuiAlign::Center,
     bg: cardColor(),
@@ -1519,20 +2203,20 @@ void buildBottomToolbar(CuiCtx ui, int* tool, int* bottomMode) {
     radius: 13.0,
     elevation: CuiElevation::Floating
   };
-  cui_row_begin(ui, &toolbar);
+  CuiId tbId = cui_row_begin(ui, &toolbar);
 
-  toolButton(ui, std::cui::icons::move(), 0, tool, "Move (V)");
-  flyoutMark(ui);
-  toolButton(ui, std::cui::icons::grid(), 1, tool, "Frame (F)");
-  flyoutMark(ui);
-  toolButton(ui, std::cui::icons::square(), 2, tool, "Rectangle (R)");
-  flyoutMark(ui);
-  toolButton(ui, std::cui::icons::pencil(), 3, tool, "Pen (P)");
-  flyoutMark(ui);
-  toolButton(ui, std::cui::icons::textTool(), 4, tool, "Text (T)");
-  flyoutMark(ui);
-  toolButton(ui, std::cui::icons::message(), 5, tool, "Comment (C)");
-  toolButton(ui, std::cui::icons::zap(), 6, tool, "Actions (Ctrl+K)");
+  toolGroupButton(ui, 0, s);
+  flyoutMark(ui, "flyout-0", 0, s);
+  toolGroupButton(ui, 1, s);
+  flyoutMark(ui, "flyout-1", 1, s);
+  toolGroupButton(ui, 2, s);
+  flyoutMark(ui, "flyout-2", 2, s);
+  toolGroupButton(ui, 3, s);
+  flyoutMark(ui, "flyout-3", 3, s);
+  toolGroupButton(ui, 4, s);
+  flyoutMark(ui, "flyout-4", 4, s);
+  toolButton(ui, std::cui::icons::message(), 5, s, "Comment (C)");
+  toolButton(ui, std::cui::icons::zap(), 6, s, "Actions (K)");
   verticalLine(ui, 23.0, dividerColor());
 
   CuiBox modes = CuiBox{
@@ -1545,12 +2229,13 @@ void buildBottomToolbar(CuiCtx ui, int* tool, int* bottomMode) {
     radius: 8.0
   };
   cui_row_begin(ui, &modes);
-  modeButton(ui, std::cui::icons::pencil(), 0, bottomMode, "Draw");
-  modeButton(ui, std::cui::icons::grid(), 1, bottomMode, "Layout");
-  modeButton(ui, std::cui::icons::code(), 2, bottomMode, "Dev mode");
+  modeButton(ui, std::cui::icons::pencil(), 0, s, "Draw");
+  modeButton(ui, std::cui::icons::grid(), 1, s, "Layout");
+  modeButton(ui, std::cui::icons::code(), 2, s, "Dev mode");
   cui_box_end(ui);
 
   cui_box_end(ui);
+  s.toolbarRect = cui_get_rect(ui, tbId);
   cui_box_end(ui);
 }
 
@@ -1572,9 +2257,7 @@ void canvasBadge(CuiCtx ui, const char* label) {
   cui_box_end(ui);
 }
 
-void buildCanvas(CuiCtx ui, int* selectedLayer, int* tool, int* bottomMode,
-                 float* offsetX, float* offsetY, bool* dragging,
-                 float* dragMouseX, float* dragMouseY) {
+void buildCanvas(CuiCtx ui, FigState* s) {
   CuiVec2 vp = cui_viewport_size(ui);
   float canvasW = vp.x - 600.0;
   float canvasH = vp.y - 50.0 - 64.0;
@@ -1586,28 +2269,80 @@ void buildCanvas(CuiCtx ui, int* selectedLayer, int* tool, int* bottomMode,
   if (baseTop < 10.0) { baseTop = 10.0; }
   if (baseLeft < 4.0) { baseLeft = 4.0; }
 
-  float absLeft = 300.0 + baseLeft + *offsetX;
-  float absTop = 50.0 + baseTop + *offsetY;
+  float absLeft = 300.0 + baseLeft + s.offsetX;
+  float absTop = 50.0 + baseTop + s.offsetY;
+  s.frameLeft = absLeft;
+  s.frameTop = absTop;
   CuiVec2 mouse = cui_mouse_pos(ui);
   CuiRect frameRect = CuiRect{x: absLeft, y: absTop, w: frameW, h: frameH};
 
-  if (cui_mouse_clicked(ui, CuiMouseButton::MouseLeft) && inRect(frameRect, mouse)) {
-    if (*tool == 0) {
-      *dragging = true;
-      *dragMouseX = mouse.x - absLeft;
-      *dragMouseY = mouse.y - absTop;
-      *selectedLayer = 0;
+  bool blockedByOverlay = s.showMainMenu || s.showExitPrompt || s.showSaveModal || s.showExportModal ||
+                          inRect(s.toolbarRect, mouse) || (s.openFlyout >= 0 && inRect(s.flyoutRect, mouse));
+
+  if (cui_mouse_clicked(ui, CuiMouseButton::MouseLeft) && inRect(frameRect, mouse) && !blockedByOverlay) {
+    if (s.tool == 0 || s.tool == 7 || s.tool == 8) {
+      s.dragging = true;
+      s.dragMouseX = mouse.x - absLeft;
+      s.dragMouseY = mouse.y - absTop;
+      s.selectedLayer = 0;
+    } else if (s.tool == 3 || s.tool == 4 || s.tool == 5 || s.tool == 17 || s.tool == 18 || s.tool == 19) {
+      if (s.shapeCount < 48) {
+        float lx = mouse.x - absLeft;
+        float ly = mouse.y - absTop;
+        float sw = 120.0;
+        float sh = 40.0;
+        if (s.tool == 3) { sw = 68.0; sh = 68.0; lx = lx - 34.0; ly = ly - 34.0; }
+        else if (s.tool == 17) { sw = 110.0; sh = 48.0; lx = lx - 55.0; ly = ly - 24.0; }
+        else if (s.tool == 19) { sw = 116.0; sh = 30.0; }
+        else if (s.tool == 5) { sw = 124.0; sh = 28.0; }
+        s.shapes[s.shapeCount] = UserShape{toolKind: s.tool, x: lx, y: ly, w: sw, h: sh};
+        s.shapeCount = s.shapeCount + 1;
+        markActiveDirty(s);
+        pickTool(s, 0);
+      }
     } else {
-      toast(ui, "Tool armed", "Draw inside the frame in the full editor.");
+      s.creating = true;
+      s.createStartX = mouse.x - absLeft;
+      s.createStartY = mouse.y - absTop;
+      s.createCurX = s.createStartX;
+      s.createCurY = s.createStartY;
     }
   }
 
-  if (*dragging) {
+  if (s.creating) {
     if (cui_mouse_down(ui, CuiMouseButton::MouseLeft)) {
-      *offsetX = mouse.x - *dragMouseX - (300.0 + baseLeft);
-      *offsetY = mouse.y - *dragMouseY - (50.0 + baseTop);
+      s.createCurX = mouse.x - absLeft;
+      s.createCurY = mouse.y - absTop;
     } else {
-      *dragging = false;
+      s.creating = false;
+      if (s.shapeCount < 48) {
+        float x0 = s.createStartX;
+        float x1 = s.createCurX;
+        if (x1 < x0) { float tmp = x0; x0 = x1; x1 = tmp; }
+        float y0 = s.createStartY;
+        float y1 = s.createCurY;
+        if (y1 < y0) { float tmp = y0; y0 = y1; y1 = tmp; }
+        float rw = x1 - x0;
+        float rh = y1 - y0;
+        if (rw < 14.0 && rh < 14.0) {
+          if (s.tool == 11 || s.tool == 12) { rw = 140.0; rh = 24.0; }
+          else if (s.tool == 13 || s.tool == 14 || s.tool == 15) { rw = 96.0; rh = 96.0; }
+          else { rw = 160.0; rh = 96.0; }
+        }
+        s.shapes[s.shapeCount] = UserShape{toolKind: s.tool, x: x0, y: y0, w: rw, h: rh};
+        s.shapeCount = s.shapeCount + 1;
+        markActiveDirty(s);
+        pickTool(s, 0);
+      }
+    }
+  }
+
+  if (s.dragging) {
+    if (cui_mouse_down(ui, CuiMouseButton::MouseLeft)) {
+      s.offsetX = mouse.x - s.dragMouseX - (300.0 + baseLeft);
+      s.offsetY = mouse.y - s.dragMouseY - (50.0 + baseTop);
+    } else {
+      s.dragging = false;
     }
   }
 
@@ -1619,8 +2354,8 @@ void buildCanvas(CuiCtx ui, int* selectedLayer, int* tool, int* bottomMode,
   };
   cui_column_begin(ui, &canvas);
 
-  float top = clampf(baseTop + *offsetY, 4.0, canvasH - 80.0);
-  float left = clampf(baseLeft + *offsetX, -frameW + 80.0, canvasW - 80.0);
+  float top = clampf(baseTop + s.offsetY, 4.0, canvasH - 80.0);
+  float left = clampf(baseLeft + s.offsetX, -frameW + 80.0, canvasW - 80.0);
 
   CuiBox topPad = CuiBox{width: std::cui::fill(), height: std::cui::px(top)};
   cui_box_begin(ui, &topPad);
@@ -1655,23 +2390,21 @@ void buildCanvas(CuiCtx ui, int* selectedLayer, int* tool, int* bottomMode,
     gap: 0.0
   };
   cui_box_begin(ui, &frameStack);
-  buildDesignFrame(ui, *selectedLayer);
-  if (*selectedLayer == 0) {
-    cui_push_disabled(ui, true);
-    cui_canvas(ui, "selection-overlay", std::cui::px(frameW), std::cui::px(frameH),
-               paintSelection, nullptr, 0);
-    cui_pop_disabled(ui);
-  }
+  buildDesignFrame(ui, s.selectedLayer);
+  cui_push_disabled(ui, true);
+  cui_canvas(ui, "selection-overlay", std::cui::px(frameW), std::cui::px(frameH),
+             paintSelection, s, 0);
+  cui_pop_disabled(ui);
   cui_box_end(ui);
 
-  designBadge(ui, *selectedLayer);
+  designBadge(ui, s.selectedLayer);
   cui_box_end(ui);
 
   cui_spacer(ui);
   cui_box_end(ui);
 
   cui_spacer(ui);
-  buildBottomToolbar(ui, tool, bottomMode);
+  buildBottomToolbar(ui, s);
   cui_box_end(ui);
 }
 
@@ -2020,6 +2753,643 @@ void buildRightPanel(CuiCtx ui, int* rightTab, int selectedLayer, bool* clipCont
 }
 
 // ---------------------------------------------------------------------------
+// Start Page (Home) & Star Main Menu Popup & File / Exit Modals
+// ---------------------------------------------------------------------------
+
+const char* tmplTitle(int idx) {
+  if (idx == 0) { return "Dashboard"; }
+  if (idx == 1) { return "Mobile App"; }
+  if (idx == 2) { return "Landing Page"; }
+  if (idx == 3) { return "Design System"; }
+  if (idx == 4) { return "Wireframe Kit"; }
+  if (idx == 5) { return "Social Post Sizes"; }
+  if (idx == 6) { return "Presentation Slides"; }
+  return "Icon Set Starter";
+}
+
+const char* tmplSub(int idx) {
+  if (idx == 0) { return "Analytics & KPIs · 1440x960"; }
+  if (idx == 1) { return "iPhone 16 Pro · 390x844"; }
+  if (idx == 2) { return "Hero & Feature Cards"; }
+  if (idx == 3) { return "Tokens & Components"; }
+  if (idx == 4) { return "Low-fi App Skeleton"; }
+  if (idx == 5) { return "IG, Story & Banner"; }
+  if (idx == 6) { return "16:9 Q4 Deck · 1280x720"; }
+  return "24px Vector Primitives";
+}
+
+const char* tmplIcon(int idx) {
+  if (idx == 0) { return std::cui::icons::chartBar(); }
+  if (idx == 1) { return std::cui::icons::compass(); }
+  if (idx == 2) { return std::cui::icons::sparkles(); }
+  if (idx == 3) { return std::cui::icons::sliders(); }
+  if (idx == 4) { return std::cui::icons::grid(); }
+  if (idx == 5) { return std::cui::icons::star(); }
+  if (idx == 6) { return std::cui::icons::play(); }
+  return std::cui::icons::pencil();
+}
+
+void homeSideItem(CuiCtx ui, const char* label, const char* glyph, int tabIdx, FigState* s) {
+  bool sel = s.homeTab == tabIdx;
+  CuiBox row = CuiBox{
+    id: label,
+    width: std::cui::fill(),
+    height: std::cui::px(34.0),
+    pad_left: 10.0,
+    pad_right: 10.0,
+    gap: 9.0,
+    align: CuiAlign::Center,
+    bg: pickColor(sel, greenSoft(), std::cui::rgba(0, 0, 0, 0)),
+    radius: 7.0
+  };
+  CuiId id = cui_row_begin(ui, &row);
+  icon(ui, glyph, 14.0, pickColor(sel, greenDark(), secondaryText()));
+  text(ui, label, 11.5, pickColor(sel, textColor(), secondaryText()), pickFloat(sel, 1.0, 0.0) as int);
+  cui_box_end(ui);
+  if (clickRect(ui, id)) {
+    s.homeTab = tabIdx;
+  }
+}
+
+void buildStartPage(CuiCtx ui, FigState* s) {
+  CuiBox shell = CuiBox{width: std::cui::fill(), height: std::cui::fill(), bg: canvasColor(), gap: 0.0};
+  cui_row_begin(ui, &shell);
+
+  CuiBox side = CuiBox{
+    width: std::cui::px(232.0),
+    height: std::cui::fill(),
+    pad: 14.0,
+    gap: 8.0,
+    bg: panelColor(),
+    border: 1.0,
+    border_color: dividerColor()
+  };
+  cui_column_begin(ui, &side);
+
+  CuiBox brand = CuiBox{
+    id: "home-star-menu",
+    width: std::cui::fill(),
+    height: std::cui::px(40.0),
+    pad_left: 6.0,
+    pad_right: 6.0,
+    gap: 10.0,
+    align: CuiAlign::Center,
+    bg: pickColor(s.showMainMenu, greenSoft(), std::cui::rgba(0, 0, 0, 0)),
+    radius: 8.0
+  };
+  CuiId brandId = cui_row_begin(ui, &brand);
+  CuiBox starBadge = CuiBox{
+    width: std::cui::px(28.0),
+    height: std::cui::px(28.0),
+    align: CuiAlign::Center,
+    justify: CuiJustify::JustifyCenter,
+    bg: pickColor(s.showMainMenu, greenColor(), greenSoft()),
+    radius: 8.0
+  };
+  cui_box_begin(ui, &starBadge);
+  icon(ui, std::cui::icons::star(), 14.0, pickColor(s.showMainMenu, navyColor(), greenDark()));
+  cui_box_end(ui);
+  CuiBox bCol = CuiBox{width: std::cui::fill(), gap: 1.0};
+  cui_column_begin(ui, &bCol);
+  text(ui, "FigCraft", 12.5, textColor(), 1);
+  text(ui, "ArtCraft Studio", 9.5, mutedText(), 0);
+  cui_box_end(ui);
+  icon(ui, std::cui::icons::chevronDown(), 11.0, mutedText());
+  cui_box_end(ui);
+  s.starBtnRect = cui_get_rect(ui, brandId);
+  if (clickRect(ui, brandId)) {
+    s.showMainMenu = !s.showMainMenu;
+  }
+
+  horizontalLine(ui, dividerColor());
+  homeSideItem(ui, "Recents", std::cui::icons::clock(), 0, s);
+  homeSideItem(ui, "Drafts", std::cui::icons::file(), 1, s);
+  homeSideItem(ui, "Templates", std::cui::icons::layers(), 2, s);
+  homeSideItem(ui, "Design Systems", std::cui::icons::sliders(), 3, s);
+  horizontalLine(ui, dividerColor());
+
+  CuiBox newBtn = CuiBox{
+    id: "home-new-file",
+    width: std::cui::fill(),
+    height: std::cui::px(34.0),
+    gap: 6.0,
+    align: CuiAlign::Center,
+    justify: CuiJustify::JustifyCenter,
+    bg: greenColor(),
+    radius: 8.0
+  };
+  CuiId newId = cui_row_begin(ui, &newBtn);
+  icon(ui, std::cui::icons::plus(), 13.5, navyColor());
+  text(ui, "New design file", 11.5, navyColor(), 1);
+  cui_box_end(ui);
+  if (clickRect(ui, newId)) {
+    openNewTabInState(s, "Untitled", 0);
+  }
+
+  CuiBox tmplBtn = CuiBox{
+    id: "home-browse-tmpl",
+    width: std::cui::fill(),
+    height: std::cui::px(32.0),
+    gap: 6.0,
+    align: CuiAlign::Center,
+    justify: CuiJustify::JustifyCenter,
+    bg: fieldColor(),
+    radius: 8.0
+  };
+  CuiId tmplBtnId = cui_row_begin(ui, &tmplBtn);
+  icon(ui, std::cui::icons::layers(), 13.0, textColor());
+  text(ui, "Browse templates", 11.0, textColor(), 0);
+  cui_box_end(ui);
+  if (clickRect(ui, tmplBtnId)) {
+    s.homeTab = 2;
+  }
+
+  cui_spacer(ui);
+  CuiBox foot = CuiBox{
+    width: std::cui::fill(),
+    height: std::cui::px(30.0),
+    pad_left: 8.0,
+    pad_right: 8.0,
+    gap: 7.0,
+    align: CuiAlign::Center,
+    bg: fieldColor(),
+    radius: 7.0
+  };
+  cui_row_begin(ui, &foot);
+  CuiBox dot = CuiBox{width: std::cui::px(8.0), height: std::cui::px(8.0), bg: greenColor(), radius: 4.0};
+  cui_box_begin(ui, &dot);
+  cui_box_end(ui);
+  text(ui, "Local workspace ready", 10.0, secondaryText(), 0);
+  cui_box_end(ui);
+
+  cui_box_end(ui);
+
+  // Main Start Page Pane
+  CuiBox main = CuiBox{
+    width: std::cui::fill(),
+    height: std::cui::fill(),
+    pad: 22.0,
+    gap: 16.0
+  };
+  cui_column_begin(ui, &main);
+
+  CuiBox topRow = CuiBox{width: std::cui::fill(), height: std::cui::px(36.0), gap: 10.0, align: CuiAlign::Center};
+  cui_row_begin(ui, &topRow);
+  const char* hTitle = "Recents";
+  if (s.homeTab == 1) { hTitle = "Drafts"; }
+  else if (s.homeTab == 2) { hTitle = "Starter Templates"; }
+  else if (s.homeTab == 3) { hTitle = "Design Systems"; }
+  text(ui, hTitle, 17.0, textColor(), 1);
+  cui_spacer(ui);
+
+  CuiInputOpts searchOpts = CuiInputOpts{
+    placeholder: "Search files and templates...",
+    width: std::cui::px(240.0),
+    height: 30.0
+  };
+  cui_input_ex(ui, "home-search-input", &s.homeSearch[0], 64, &searchOpts);
+
+  CuiBox viewPill = CuiBox{
+    width: std::cui::fit(),
+    height: std::cui::px(30.0),
+    pad: 2.0,
+    gap: 2.0,
+    align: CuiAlign::Center,
+    bg: cardColor(),
+    border: 1.0,
+    border_color: dividerColor(),
+    radius: 7.0
+  };
+  cui_row_begin(ui, &viewPill);
+  if (flatIcon(ui, std::cui::icons::grid(), 13.0, pickColor(s.homeGridView, greenDark(), mutedText()), "Grid view")) {
+    s.homeGridView = true;
+  }
+  if (flatIcon(ui, std::cui::icons::layers(), 13.0, pickColor(!s.homeGridView, greenDark(), mutedText()), "List view")) {
+    s.homeGridView = false;
+  }
+  cui_box_end(ui);
+  cui_box_end(ui);
+
+  CuiScrollOpts scroll = CuiScrollOpts{width: std::cui::fill(), height: std::cui::fill(), gap: 16.0};
+  cui_scroll_begin(ui, &scroll);
+
+  if (s.homeTab == 0 || s.homeTab == 1) {
+    text(ui, "Open design files", 11.5, secondaryText(), 1);
+    CuiBox filesWrap = CuiBox{width: std::cui::fill(), dir: CuiDir::Row, wrap: true, gap: 14.0};
+    cui_box_begin(ui, &filesWrap);
+    for (int i = 0; i < s.tabCount; i = i + 1) {
+      if (!containsFold(&s.tabs[i].title[0], &s.homeSearch[0])) { continue; }
+      bool cur = s.activeTab == i;
+      CuiBox fCard = CuiBox{
+        width: std::cui::px(248.0),
+        height: std::cui::px(156.0),
+        bg: cardColor(),
+        border: pickFloat(cur, 1.5, 1.0),
+        border_color: pickColor(cur, greenColor(), dividerColor()),
+        radius: 10.0,
+        clip: true
+      };
+      CuiId fId = cui_column_begin(ui, &fCard);
+      CuiBox fThumb = CuiBox{
+        width: std::cui::fill(),
+        height: std::cui::px(96.0),
+        align: CuiAlign::Center,
+        justify: CuiJustify::JustifyCenter,
+        bg: greenSoft()
+      };
+      cui_box_begin(ui, &fThumb);
+      icon(ui, std::cui::icons::layers(), 24.0, greenDark());
+      cui_box_end(ui);
+      CuiBox fMeta = CuiBox{width: std::cui::fill(), height: std::cui::fill(), pad_left: 12.0, pad_right: 12.0, gap: 3.0, justify: CuiJustify::JustifyCenter};
+      cui_column_begin(ui, &fMeta);
+      text(ui, &s.tabs[i].title[0], 11.5, textColor(), 1);
+      text(ui, pickString(s.tabs[i].dirty, "Unsaved edits", "Saved"), 9.5, mutedText(), 0);
+      cui_box_end(ui);
+      cui_box_end(ui);
+      if (clickRect(ui, fId)) {
+        s.activeTab = i;
+        s.showHome = false;
+      }
+    }
+    cui_box_end(ui);
+  }
+
+  if (s.homeTab != 1) {
+    text(ui, "Start from a template", 11.5, secondaryText(), 1);
+    CuiBox tmplWrap = CuiBox{
+      width: std::cui::fill(),
+      dir: if (s.homeGridView) CuiDir::Row else CuiDir::Column,
+      wrap: s.homeGridView,
+      gap: pickFloat(s.homeGridView, 14.0, 6.0)
+    };
+    cui_box_begin(ui, &tmplWrap);
+    for (int t = 0; t < 8; t = t + 1) {
+      if (s.homeTab == 3 && t != 3 && t != 4 && t != 7 && t != 0) { continue; }
+      if (!containsFold(tmplTitle(t), &s.homeSearch[0]) && !containsFold(tmplSub(t), &s.homeSearch[0])) { continue; }
+      if (s.homeGridView) {
+        CuiBox tCard = CuiBox{
+          id: tmplTitle(t),
+          width: std::cui::px(248.0),
+          height: std::cui::px(154.0),
+          bg: cardColor(),
+          border: 1.0,
+          border_color: dividerColor(),
+          radius: 10.0,
+          clip: true
+        };
+        CuiId tId = cui_column_begin(ui, &tCard);
+        CuiBox tThumb = CuiBox{
+          width: std::cui::fill(),
+          height: std::cui::px(92.0),
+          align: CuiAlign::Center,
+          justify: CuiJustify::JustifyCenter,
+          bg: pickColor(t % 2 == 0, greenSoft(), blueSoft())
+        };
+        cui_box_begin(ui, &tThumb);
+        icon(ui, tmplIcon(t), 24.0, pickColor(t % 2 == 0, greenDark(), chartBlue()));
+        cui_box_end(ui);
+        CuiBox tMeta = CuiBox{width: std::cui::fill(), height: std::cui::fill(), pad_left: 12.0, pad_right: 12.0, gap: 3.0, justify: CuiJustify::JustifyCenter};
+        cui_column_begin(ui, &tMeta);
+        text(ui, tmplTitle(t), 11.5, textColor(), 1);
+        text(ui, tmplSub(t), 9.5, mutedText(), 0);
+        cui_box_end(ui);
+        cui_box_end(ui);
+        if (clickRect(ui, tId)) {
+          openNewTabInState(s, tmplTitle(t), t);
+          toast(ui, "Template opened", tmplTitle(t));
+        }
+      } else {
+        CuiBox lRow = CuiBox{
+          id: tmplTitle(t),
+          width: std::cui::fill(),
+          height: std::cui::px(42.0),
+          pad_left: 12.0,
+          pad_right: 12.0,
+          gap: 10.0,
+          align: CuiAlign::Center,
+          bg: cardColor(),
+          border: 1.0,
+          border_color: dividerColor(),
+          radius: 8.0
+        };
+        CuiId lId = cui_row_begin(ui, &lRow);
+        icon(ui, tmplIcon(t), 14.0, greenDark());
+        text(ui, tmplTitle(t), 11.5, textColor(), 1);
+        cui_spacer(ui);
+        text(ui, tmplSub(t), 9.5, mutedText(), 0);
+        cui_box_end(ui);
+        if (clickRect(ui, lId)) {
+          openNewTabInState(s, tmplTitle(t), t);
+          toast(ui, "Template opened", tmplTitle(t));
+        }
+      }
+    }
+    cui_box_end(ui);
+  }
+
+  cui_scroll_end(ui);
+  cui_box_end(ui);
+  cui_box_end(ui);
+}
+
+bool menuItemRow(CuiCtx ui, const char* glyph, const char* label, const char* shortcut,
+                 bool checked, bool danger) {
+  CuiBox row = CuiBox{
+    id: label,
+    width: std::cui::fill(),
+    height: std::cui::px(30.0),
+    pad_left: 8.0,
+    pad_right: 8.0,
+    gap: 8.0,
+    align: CuiAlign::Center,
+    radius: 6.0
+  };
+  CuiId id = cui_row_begin(ui, &row);
+  CuiBox chk = CuiBox{width: std::cui::px(14.0), height: std::cui::px(14.0), align: CuiAlign::Center, justify: CuiJustify::JustifyCenter};
+  cui_box_begin(ui, &chk);
+  if (checked) { icon(ui, std::cui::icons::check(), 11.0, greenDark()); }
+  cui_box_end(ui);
+  icon(ui, glyph, 13.5, pickColor(danger, dangerColor(), pickColor(checked, greenDark(), secondaryText())));
+  text(ui, label, 11.0, pickColor(danger, dangerColor(), textColor()), 0);
+  cui_spacer(ui);
+  if (shortcut[0] != '\0') {
+    text(ui, shortcut, 9.5, mutedText(), 3);
+  }
+  cui_box_end(ui);
+  return clickRect(ui, id);
+}
+
+void buildMainMenuPopup(CuiCtx ui, CuiApp app, FigState* s) {
+  bool unsaved = anyUnsavedTab(s);
+  CuiBox overlay = CuiBox{
+    width: std::cui::fill(),
+    height: std::cui::fill(),
+    pad_top: 54.0,
+    pad_left: 56.0,
+    align: CuiAlign::Start,
+    justify: CuiJustify::JustifyStart
+  };
+  cui_column_begin(ui, &overlay);
+
+  CuiBox card = CuiBox{
+    id: "main-menu-card",
+    width: std::cui::px(258.0),
+    height: std::cui::fit(),
+    pad: 8.0,
+    gap: 2.0,
+    bg: cardColor(),
+    border: 1.0,
+    border_color: dividerColor(),
+    radius: 11.0,
+    elevation: CuiElevation::Floating
+  };
+  CuiId cardId = cui_column_begin(ui, &card);
+
+  CuiBox head = CuiBox{width: std::cui::fill(), height: std::cui::px(34.0), pad_left: 8.0, pad_right: 8.0, gap: 8.0, align: CuiAlign::Center};
+  cui_row_begin(ui, &head);
+  CuiBox badge = CuiBox{width: std::cui::px(22.0), height: std::cui::px(22.0), align: CuiAlign::Center, justify: CuiJustify::JustifyCenter, bg: greenSoft(), radius: 6.0};
+  cui_box_begin(ui, &badge);
+  icon(ui, std::cui::icons::star(), 12.0, greenDark());
+  cui_box_end(ui);
+  text(ui, "FigCraft Studio", 11.5, textColor(), 1);
+  cui_spacer(ui);
+  CuiBox pill = CuiBox{
+    width: std::cui::fit(),
+    height: std::cui::px(18.0),
+    pad_left: 6.0,
+    pad_right: 6.0,
+    align: CuiAlign::Center,
+    justify: CuiJustify::JustifyCenter,
+    bg: pickColor(unsaved, warningSoft(), greenSoft()),
+    radius: 4.0
+  };
+  cui_box_begin(ui, &pill);
+  text(ui, pickString(unsaved, "Unsaved", "Saved"), 9.0, pickColor(unsaved, warningColor(), greenDark()), 1);
+  cui_box_end(ui);
+  cui_box_end(ui);
+
+  horizontalLine(ui, dividerColor());
+
+  if (menuItemRow(ui, std::cui::icons::home(), "Back to files", "Esc", false, false)) {
+    s.showHome = true;
+    s.showMainMenu = false;
+  }
+  if (menuItemRow(ui, std::cui::icons::zap(), "Quick actions...", "K", false, false)) {
+    s.showActions = !s.showActions;
+    s.showMainMenu = false;
+  }
+
+  horizontalLine(ui, dividerColor());
+
+  if (menuItemRow(ui, std::cui::icons::plus(), "New design file", "Ctrl+N", false, false)) {
+    openNewTabInState(s, "Untitled", 0);
+  }
+  if (menuItemRow(ui, std::cui::icons::layers(), "New from template...", "", false, false)) {
+    s.showHome = true;
+    s.homeTab = 2;
+    s.showMainMenu = false;
+  }
+  if (menuItemRow(ui, std::cui::icons::folderOpen(), "Open...", "Ctrl+O", false, false)) {
+    s.showHome = true;
+    s.homeTab = 0;
+    s.showMainMenu = false;
+  }
+  if (menuItemRow(ui, std::cui::icons::save(), "Save", "Ctrl+S", false, false)) {
+    s.tabs[s.activeTab].dirty = false;
+    s.showMainMenu = false;
+    toast(ui, "File saved", &s.tabs[s.activeTab].title[0]);
+  }
+  if (menuItemRow(ui, std::cui::icons::copy(), "Save local copy...", "Shift+S", false, false)) {
+    copyStr(&s.saveAsName[0], &s.tabs[s.activeTab].title[0], 48);
+    appendStr(&s.saveAsName[0], " copy", 48);
+    s.showSaveModal = true;
+    s.showMainMenu = false;
+  }
+  if (menuItemRow(ui, std::cui::icons::download(), "Export...", "Ctrl+E", false, false)) {
+    s.showExportModal = true;
+    s.showMainMenu = false;
+  }
+
+  horizontalLine(ui, dividerColor());
+
+  if (menuItemRow(ui, std::cui::icons::grid(), "Show layout grid", "G", s.showGrid, false)) {
+    s.showGrid = !s.showGrid;
+    s.showMainMenu = false;
+  }
+  if (menuItemRow(ui, std::cui::icons::box(), "Wireframe outlines", "", s.outlineMode, false)) {
+    s.outlineMode = !s.outlineMode;
+    s.showMainMenu = false;
+  }
+  if (menuItemRow(ui, std::cui::icons::help(), "Keyboard shortcuts", "?", s.showHelp, false)) {
+    s.showHelp = !s.showHelp;
+    s.showMainMenu = false;
+  }
+
+  horizontalLine(ui, dividerColor());
+
+  if (menuItemRow(ui, std::cui::icons::fileText(), "Close tab", "Ctrl+W", false, false)) {
+    s.showMainMenu = false;
+    if (s.tabCount > 1) {
+      for (int j = s.activeTab; j < s.tabCount - 1; j = j + 1) {
+        s.tabs[j] = s.tabs[j + 1];
+      }
+      s.tabCount = s.tabCount - 1;
+      if (s.activeTab >= s.tabCount) { s.activeTab = s.tabCount - 1; }
+    } else {
+      s.showHome = true;
+    }
+  }
+  if (menuItemRow(ui, std::cui::icons::x(), "Exit FigCraft", "Alt+F4", false, true)) {
+    requestExitApp(s, app);
+  }
+
+  cui_box_end(ui);
+  s.mainMenuRect = cui_get_rect(ui, cardId);
+  cui_box_end(ui);
+}
+
+void buildExitModal(CuiCtx ui, CuiApp app, FigState* s) {
+  CuiBox back = CuiBox{
+    width: std::cui::fill(),
+    height: std::cui::fill(),
+    bg: std::cui::rgba(15, 23, 38, 125),
+    align: CuiAlign::Center,
+    justify: CuiJustify::JustifyCenter
+  };
+  cui_column_begin(ui, &back);
+
+  CuiBox modal = CuiBox{
+    width: std::cui::px(400.0),
+    height: std::cui::fit(),
+    pad: 18.0,
+    gap: 12.0,
+    bg: cardColor(),
+    border: 1.0,
+    border_color: dividerColor(),
+    radius: 12.0,
+    elevation: CuiElevation::Floating
+  };
+  cui_column_begin(ui, &modal);
+  text(ui, "Unsaved changes in FigCraft", 13.5, textColor(), 1);
+  textWrapped(ui, "You have unsaved canvas edits. Save before exiting FigCraft?", 11.0, secondaryText(), 0);
+  horizontalLine(ui, dividerColor());
+
+  CuiBox acts = CuiBox{width: std::cui::fill(), height: std::cui::px(34.0), gap: 8.0, align: CuiAlign::Center};
+  cui_row_begin(ui, &acts);
+  cui_spacer(ui);
+
+  CuiBox cancelB = CuiBox{id: "exit-cancel", width: std::cui::fit(), height: std::cui::px(30.0), pad_left: 12.0, pad_right: 12.0, align: CuiAlign::Center, justify: CuiJustify::JustifyCenter, bg: fieldColor(), radius: 7.0};
+  CuiId cancelId = cui_box_begin(ui, &cancelB);
+  text(ui, "Cancel", 11.0, textColor(), 0);
+  cui_box_end(ui);
+  if (clickRect(ui, cancelId)) { s.showExitPrompt = false; }
+
+  CuiBox discB = CuiBox{id: "exit-discard", width: std::cui::fit(), height: std::cui::px(30.0), pad_left: 12.0, pad_right: 12.0, align: CuiAlign::Center, justify: CuiJustify::JustifyCenter, bg: dangerSoft(), radius: 7.0};
+  CuiId discId = cui_box_begin(ui, &discB);
+  text(ui, "Close without saving", 11.0, dangerColor(), 1);
+  cui_box_end(ui);
+  if (clickRect(ui, discId)) { cui_app_quit(app); }
+
+  CuiBox saveB = CuiBox{id: "exit-save", width: std::cui::fit(), height: std::cui::px(30.0), pad_left: 14.0, pad_right: 14.0, align: CuiAlign::Center, justify: CuiJustify::JustifyCenter, bg: greenColor(), radius: 7.0};
+  CuiId saveId = cui_box_begin(ui, &saveB);
+  text(ui, "Save & Exit", 11.0, navyColor(), 1);
+  cui_box_end(ui);
+  if (clickRect(ui, saveId)) {
+    s.tabs[s.activeTab].dirty = false;
+    cui_app_quit(app);
+  }
+
+  cui_box_end(ui);
+  cui_box_end(ui);
+  cui_box_end(ui);
+}
+
+void buildSaveModal(CuiCtx ui, FigState* s) {
+  CuiBox back = CuiBox{width: std::cui::fill(), height: std::cui::fill(), bg: std::cui::rgba(15, 23, 38, 125), align: CuiAlign::Center, justify: CuiJustify::JustifyCenter};
+  cui_column_begin(ui, &back);
+  CuiBox modal = CuiBox{width: std::cui::px(380.0), height: std::cui::fit(), pad: 18.0, gap: 12.0, bg: cardColor(), border: 1.0, border_color: dividerColor(), radius: 12.0, elevation: CuiElevation::Floating};
+  cui_column_begin(ui, &modal);
+  text(ui, "Save local copy", 13.5, textColor(), 1);
+  CuiInputOpts inOpts = CuiInputOpts{placeholder: "File name...", width: std::cui::fill(), height: 32.0};
+  cui_input_ex(ui, "save-as-input", &s.saveAsName[0], 48, &inOpts);
+
+  CuiBox acts = CuiBox{width: std::cui::fill(), height: std::cui::px(32.0), gap: 8.0, align: CuiAlign::Center};
+  cui_row_begin(ui, &acts);
+  cui_spacer(ui);
+  CuiBox cancelB = CuiBox{id: "save-cancel", width: std::cui::fit(), height: std::cui::px(30.0), pad_left: 12.0, pad_right: 12.0, align: CuiAlign::Center, justify: CuiJustify::JustifyCenter, bg: fieldColor(), radius: 7.0};
+  CuiId cId = cui_box_begin(ui, &cancelB);
+  text(ui, "Cancel", 11.0, textColor(), 0);
+  cui_box_end(ui);
+  if (clickRect(ui, cId)) { s.showSaveModal = false; }
+
+  CuiBox okB = CuiBox{id: "save-ok", width: std::cui::fit(), height: std::cui::px(30.0), pad_left: 14.0, pad_right: 14.0, align: CuiAlign::Center, justify: CuiJustify::JustifyCenter, bg: greenColor(), radius: 7.0};
+  CuiId oId = cui_box_begin(ui, &okB);
+  text(ui, "Save copy", 11.0, navyColor(), 1);
+  cui_box_end(ui);
+  if (clickRect(ui, oId)) {
+    openNewTabInState(s, &s.saveAsName[0], s.tabs[s.activeTab].templateIdx);
+    s.showSaveModal = false;
+    toast(ui, "Local copy saved", &s.tabs[s.activeTab].title[0]);
+  }
+  cui_box_end(ui);
+  cui_box_end(ui);
+  cui_box_end(ui);
+}
+
+void buildExportModal(CuiCtx ui, FigState* s) {
+  CuiBox back = CuiBox{width: std::cui::fill(), height: std::cui::fill(), bg: std::cui::rgba(15, 23, 38, 125), align: CuiAlign::Center, justify: CuiJustify::JustifyCenter};
+  cui_column_begin(ui, &back);
+  CuiBox modal = CuiBox{width: std::cui::px(380.0), height: std::cui::fit(), pad: 18.0, gap: 10.0, bg: cardColor(), border: 1.0, border_color: dividerColor(), radius: 12.0, elevation: CuiElevation::Floating};
+  cui_column_begin(ui, &modal);
+  text(ui, "Export design", 13.5, textColor(), 1);
+
+  for (int f = 0; f < 4; f = f + 1) {
+    bool sel = s.exportFormat == f;
+    const char* fName = if (f == 0) "PNG (2x Retina)" else if (f == 1) "SVG Vector" else if (f == 2) "PDF Document" else "Glang CUI Code";
+    CuiBox fRow = CuiBox{
+      id: fName,
+      width: std::cui::fill(),
+      height: std::cui::px(34.0),
+      pad_left: 10.0,
+      pad_right: 10.0,
+      gap: 8.0,
+      align: CuiAlign::Center,
+      bg: pickColor(sel, greenSoft(), fieldColor()),
+      border: 1.0,
+      border_color: pickColor(sel, greenColor(), dividerColor()),
+      radius: 7.0
+    };
+    CuiId fId = cui_row_begin(ui, &fRow);
+    text(ui, fName, 11.0, textColor(), pickFloat(sel, 1.0, 0.0) as int);
+    cui_spacer(ui);
+    if (sel) { icon(ui, std::cui::icons::check(), 12.0, greenDark()); }
+    cui_box_end(ui);
+    if (clickRect(ui, fId)) { s.exportFormat = f; }
+  }
+
+  CuiBox acts = CuiBox{width: std::cui::fill(), height: std::cui::px(32.0), gap: 8.0, align: CuiAlign::Center};
+  cui_row_begin(ui, &acts);
+  cui_spacer(ui);
+  CuiBox cancelB = CuiBox{id: "exp-cancel", width: std::cui::fit(), height: std::cui::px(30.0), pad_left: 12.0, pad_right: 12.0, align: CuiAlign::Center, justify: CuiJustify::JustifyCenter, bg: fieldColor(), radius: 7.0};
+  CuiId cId = cui_box_begin(ui, &cancelB);
+  text(ui, "Cancel", 11.0, textColor(), 0);
+  cui_box_end(ui);
+  if (clickRect(ui, cId)) { s.showExportModal = false; }
+
+  CuiBox okB = CuiBox{id: "exp-ok", width: std::cui::fit(), height: std::cui::px(30.0), pad_left: 14.0, pad_right: 14.0, align: CuiAlign::Center, justify: CuiJustify::JustifyCenter, bg: greenColor(), radius: 7.0};
+  CuiId oId = cui_box_begin(ui, &okB);
+  text(ui, "Export", 11.0, navyColor(), 1);
+  cui_box_end(ui);
+  if (clickRect(ui, oId)) {
+    s.showExportModal = false;
+    toast(ui, "Export complete", &s.tabs[s.activeTab].title[0]);
+  }
+  cui_box_end(ui);
+  cui_box_end(ui);
+  cui_box_end(ui);
+}
+
+// ---------------------------------------------------------------------------
 // App
 // ---------------------------------------------------------------------------
 
@@ -2044,24 +3414,31 @@ int main() {
   }
   defer cui_app_destroy(app);
 
-  int leftTab = 0;
-  int selectedPage = 0;
-  int selectedLayer = 0;
-  int rightTab = 0;
-  int tool = 0;
-  int bottomMode = 0;
-  bool clipContent = true;
-  bool fillVisible = true;
-  bool dragging = false;
-  float dragMouseX = 0.0;
-  float dragMouseY = 0.0;
-  float offsetX = 0.0;
-  float offsetY = 0.0;
+  FigState state;
+  initFigState(&state);
   int frames = 0;
 
   while (cui_app_frame(app)) {
     CuiCtx ui = cui_app_ui(app);
-    handleShortcuts(ui, &tool);
+    handleShortcuts(ui, &state);
+
+    if (cui_mouse_clicked(ui, CuiMouseButton::MouseLeft)) {
+      CuiVec2 mp = cui_mouse_pos(ui);
+      if (state.showMainMenu && !inRect(state.mainMenuRect, mp) && !inRect(state.starBtnRect, mp)) {
+        state.showMainMenu = false;
+      }
+      if (state.openFlyout >= 0 && !inRect(state.flyoutRect, mp) && !inRect(state.toolbarRect, mp)) {
+        state.openFlyout = -1;
+      }
+    }
+
+    CuiBox shell = CuiBox{
+      width: std::cui::fill(),
+      height: std::cui::fill(),
+      dir: CuiDir::Stack,
+      bg: chromeColor()
+    };
+    cui_box_begin(ui, &shell);
 
     CuiBox root = CuiBox{
       width: std::cui::fill(),
@@ -2071,22 +3448,38 @@ int main() {
     };
     cui_column_begin(ui, &root);
 
-    buildTopBar(ui, app);
+    buildTopBar(ui, app, &state);
 
-    CuiBox main = CuiBox{
-      width: std::cui::fill(),
-      height: std::cui::fill(),
-      gap: 0.0
-    };
-    cui_row_begin(ui, &main);
+    if (state.showHome) {
+      buildStartPage(ui, &state);
+    } else {
+      CuiBox main = CuiBox{
+        width: std::cui::fill(),
+        height: std::cui::fill(),
+        gap: 0.0
+      };
+      cui_row_begin(ui, &main);
 
-    buildRail(ui, &leftTab);
-    buildLeftPanel(ui, leftTab, &selectedPage, &selectedLayer);
-    buildCanvas(ui, &selectedLayer, &tool, &bottomMode,
-                &offsetX, &offsetY, &dragging, &dragMouseX, &dragMouseY);
-    buildRightPanel(ui, &rightTab, selectedLayer, &clipContent, &fillVisible);
+      buildRail(ui, &state);
+      buildLeftPanel(ui, state.leftTab, &state.selectedPage, &state.selectedLayer);
+      buildCanvas(ui, &state);
+      buildRightPanel(ui, &state.rightTab, state.selectedLayer, &state.clipContent, &state.fillVisible);
 
+      cui_box_end(ui);
+    }
     cui_box_end(ui);
+
+    if (state.showMainMenu) {
+      buildMainMenuPopup(ui, app, &state);
+    }
+    if (state.showExitPrompt) {
+      buildExitModal(ui, app, &state);
+    } else if (state.showSaveModal) {
+      buildSaveModal(ui, &state);
+    } else if (state.showExportModal) {
+      buildExportModal(ui, &state);
+    }
+
     cui_box_end(ui);
 
     frames++;

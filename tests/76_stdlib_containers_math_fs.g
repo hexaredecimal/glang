@@ -16,7 +16,7 @@ import std.string.compare;
 import std.fs.path;
 import std.fs.write;
 import std.fs.read;
-import std.memory.owned;
+import std.string.owned;
 import std.io.print;
 import std.io.error;
 import std.lib;
@@ -80,31 +80,31 @@ void main() {
   if (has_extension("archive.tar.gz", ".tar")) std::exit(29);
 
   auto writeResult = std::fs::write_string("build/stdlib_expansion_test.txt", "hello");
-  if (writeResult.isErr()) {
+  if (writeResult.is_err()) {
     eprintln("write_string failed");
     std::exit(30);
   }
   auto appendResult = std::fs::append_string("build/stdlib_expansion_test.txt", " world");
-  if (appendResult.isErr()) {
+  if (appendResult.is_err()) {
     eprintln("append_string failed");
     std::exit(31);
   }
 
   auto contentsResult = std::fs::read_to_string("build/stdlib_expansion_test.txt");
-  if (contentsResult.isErr()) {
+  if (contentsResult.is_err()) {
     eprintln("read_to_string failed");
     std::exit(32);
   }
   auto contents = contentsResult.unwrap();
-  if (contents.ptr[0] != 'h' || contents.ptr[5] != ' ' || contents.ptr[10] != 'd') {
-    std::memory::release(&contents);
+  const char* contentsText = contents.c_str();
+  if (contentsText[0] != 'h' || contentsText[5] != ' ' ||
+      contentsText[10] != 'd') {
     std::exit(33);
   }
-  std::memory::release(&contents);
 
   const char* bytes = "abc";
   auto bytesResult = std::fs::write_bytes("build/stdlib_expansion_bytes_test.bin", bytes, 3);
-  if (bytesResult.isErr()) std::exit(34);
+  if (bytesResult.is_err()) std::exit(34);
 
   // Exercise the print overloads; output is intentionally minimal.
   print('G');
@@ -114,3 +114,4 @@ void main() {
   print(1.5 as float);
   println();
 }
+

@@ -1,19 +1,26 @@
-import std.memory.owned;
-import std.memory.c.mem;
-import std.string.dup;
-import std.result; 
+import std.string.prelude;
+import std.string.string;
+import std.result;
 
-Result<std::memory::Owned<char>> to_owned(const char* str) {
-    auto len = str.strlen();
-    auto (ptr, isOk) = std::memory::allocate<char>(len + 1);
-
-    if (!isOk) {
-        return std::error("std::string::toOwned: Failed to allocate memory");
+/// Copy `str` into a newly allocated `String`.
+///
+/// The only failure is a null input, so `own` keeps the fallible signature
+/// used by callers that validate external C strings. Prefer `String::from`
+/// when the input is known to be non-null.
+Result<String> std::string::own(const char* str) {
+    if (str == nullptr) {
+        return std::error("std::string::own: Cannot own a null string");
     }
-    std::memory::memcpy(ptr, str, len + 1);
-
-    return std::ok(std::memory::Owned{ptr, len + 1});
+    return std::ok(String::from(str));
 }
 
-Result<std::memory::Owned<char>> toOwned(const char* str) => to_owned(str);
+/// Copy at most `count` characters of `str` into a newly allocated `String`.
+Result<String> std::string::own(const char* str, ulong count) {
+    if (str == nullptr) {
+        return std::error("std::string::own: Cannot own a null string");
+    }
+    return std::ok(String::from(str, count));
+}
 
+Result<String> own(const char* str) => std::string::own(str);
+Result<String> own(const char* str, ulong count) => std::string::own(str, count);

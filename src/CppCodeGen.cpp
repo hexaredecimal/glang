@@ -8,6 +8,33 @@
 
 namespace Glang {
 
+// C-style array decay: slices (`std::span`) convert to a raw element pointer
+// with `.data()`. Fixed arrays are emitted as raw C arrays and decay
+// automatically.
+static bool isSliceType(TypePtr type) {
+  TypePtr normalized = type ? type->underlyingType() : nullptr;
+  return normalized && normalized->isSlice();
+}
+
+static std::string decayToPointer(const std::string& value, TypePtr source,
+                                  TypePtr target) {
+  if (!source || !target) return value;
+  TypePtr targetType = target->underlyingType();
+  if (targetType && targetType->isPointer() && isSliceType(source)) {
+    return value + ".data()";
+  }
+  return value;
+}
+
+static std::string decayToPointer(const std::string& value, TypePtr source,
+                                  TypeASTPtr target) {
+  if (!source || !target || !target->isPointer) return value;
+  if (isSliceType(source)) {
+    return value + ".data()";
+  }
+  return value;
+}
+
 static std::string cppLiteral(const std::string& value, char delimiter) {
   static const char hexDigits[] = "0123456789ABCDEF";
   std::string result(1, delimiter);
@@ -560,14 +587,21 @@ std::string CppCodeGen::definition(
   out << declaration(function) << " {\n";
   const bool previousMainFunction = m_inMainFunction;
   m_inMainFunction = function->name == "main";
+  TypeASTPtr previousReturnType = m_currentReturnTypeAst;
+  m_currentReturnTypeAst = function->returnTypeAst;
   if (auto body = std::dynamic_pointer_cast<BlockExprAST>(function->body)) {
     out << block(body, 1, true);
   } else if (function->name == "main") {
     out << "  " << expression(function->body) << ";\n";
     out << "  return 0;\n";
   } else {
-    out << "  return " << expression(function->body) << ";\n";
+    out << "  return "
+        << decayToPointer(expression(function->body),
+                          function->body->inferredType,
+                          m_currentReturnTypeAst)
+        << ";\n";
   }
+  m_currentReturnTypeAst = previousReturnType;
   m_inMainFunction = previousMainFunction;
   out << "}\n";
   return out.str();
@@ -691,6 +725,25 @@ std::string CppCodeGen::statement(StmtPtr stmt, int level) {
              type(variable->inferredType->elementType) + "> " + name +
              " = " + expression(variable->initializer) + ";\n";
     }
+    if (variable->initializer &&
+        std::dynamic_pointer_cast<ArrayLiteralExprAST>(variable->initializer) &&
+        variable->inferredType && variable->inferredType->isPointer()) {
+      auto array = std::dynamic_pointer_cast<ArrayLiteralExprAST>(
+          variable->initializer);
+      TypePtr base = variable->inferredType->pointerBase;
+      const std::string storage =
+          "_glang_array_" + std::to_string(m_nextArrayId++);
+      std::ostringstream literal;
+      literal << type(base) << " " << storage << "[" << array->elements.size()
+              << "] = {";
+      for (size_t item = 0; item < array->elements.size(); ++item) {
+        if (item) literal << ", ";
+        literal << expression(array->elements[item]);
+      }
+      literal << "}";
+      return pad + literal.str() + ";\n" + pad + t + " " + name + " = " +
+             storage + ";\n";
+    }
     if (variable->initializer) {
       std::string initializer = expression(variable->initializer);
       TypePtr sourceType = variable->initializer->inferredType
@@ -707,19 +760,30 @@ std::string CppCodeGen::statement(StmtPtr stmt, int level) {
         initializer =
             "static_cast<" + t + ">(" + initializer + ")";
       }
+      initializer = decayToPointer(initializer, sourceType, targetType);
       return pad + t + " " + name + " = " + initializer + ";\n";
     }
     return pad + t + " " + name + "{};\n";
   }
   if (auto ret = std::dynamic_pointer_cast<ReturnStmtAST>(stmt)) {
-    return pad + "return" +
-           (ret->value ? " " + expression(ret->value)
-                       : (m_inMainFunction ? " 0" : "")) +
-           ";\n";
+    std::string value;
+    if (ret->value) {
+      value = " " + decayToPointer(expression(ret->value),
+                                   ret->value->inferredType,
+                                   m_currentReturnTypeAst);
+    } else if (m_inMainFunction) {
+      value = " 0";
+    }
+    return pad + "return" + value + ";\n";
   }
   if (auto yield = std::dynamic_pointer_cast<YieldStmtAST>(stmt)) {
-    return pad + "return" +
-           (yield->value ? " " + expression(yield->value) : "") + ";\n";
+    std::string value;
+    if (yield->value) {
+      value = " " + decayToPointer(expression(yield->value),
+                                   yield->value->inferredType,
+                                   m_currentReturnTypeAst);
+    }
+    return pad + "return" + value + ";\n";
   }
   if (auto defer = std::dynamic_pointer_cast<DeferStmtAST>(stmt)) {
     std::string name = "_glang_defer_" + std::to_string(m_nextDeferId++);
@@ -984,6 +1048,30 @@ std::string CppCodeGen::callArgument(ExprPtr argument, TypePtr parameterType,
       temporaries.declarations.push_back(storage.str());
       return "std::span<" + elementType + ">(" + name + ")";
     }
+    if (parameter && parameter->isPointer()) {
+      if (auto array =
+              std::dynamic_pointer_cast<ArrayLiteralExprAST>(argument)) {
+        TypePtr base = parameter->pointerBase;
+        if (base && !base->isVoid()) {
+          const std::string name =
+              "_glang_ptr_arg_" + std::to_string(m_nextArrayId++);
+          std::ostringstream storage;
+          storage << type(base) << " " << name << "["
+                  << array->elements.size() << "] = {";
+          for (size_t item = 0; item < array->elements.size(); ++item) {
+            if (item) storage << ", ";
+            storage << expression(array->elements[item]);
+          }
+          storage << "}";
+          temporaries.declarations.push_back(storage.str());
+          return name;
+        }
+      }
+      if (argument && argument->inferredType &&
+          isSliceType(argument->inferredType)) {
+        return expression(argument) + ".data()";
+      }
+    }
   }
   return expression(argument);
 }
@@ -1020,6 +1108,7 @@ std::string CppCodeGen::call(std::shared_ptr<CallExprAST> expr) {
     std::string intrinsic;
     if (id->name == "__list_push") intrinsic = "glang::list_push";
     if (id->name == "__list_length") intrinsic = "glang::list_length";
+    if (id->name == "__slice_from_ptr") intrinsic = "glang::slice_from_ptr";
     if (id->name.rfind("__lazy_", 0) == 0) {
       intrinsic = "glang::" + id->name.substr(2);
     }
@@ -1034,6 +1123,8 @@ std::string CppCodeGen::call(std::shared_ptr<CallExprAST> expr) {
         hasIntrinsicSuffix("__new_box_with_deleter");
     const bool boxFromCall = hasIntrinsicSuffix("__box_from");
     const bool adoptBoxCall = hasIntrinsicSuffix("__adopt_box");
+    const bool newBoxArrayCall = hasIntrinsicSuffix("__new_box_array");
+    const bool boxUseCountCall = hasIntrinsicSuffix("__box_use_count");
 
     auto boxTypeArgument = [&]() -> TypePtr {
       TypePtr result = expr->targetReturnType
@@ -1074,6 +1165,18 @@ std::string CppCodeGen::call(std::shared_ptr<CallExprAST> expr) {
                expression(expr->arguments[0]) + ", " +
                expression(expr->arguments[1]) + ")";
       }
+    }
+    if (newBoxArrayCall && expr->arguments.size() == 1) {
+      TypePtr inner = boxTypeArgument();
+      if (inner) {
+        const std::string element = type(inner);
+        return "std::shared_ptr<" + element + ">(new " + element + "[" +
+               expression(expr->arguments[0]) + "](), []( " + element +
+               "* pointer) { delete[] pointer; })";
+      }
+    }
+    if (boxUseCountCall && expr->arguments.size() == 1) {
+      return "(" + expression(expr->arguments[0]) + ")->use_count()";
     }
     if (!intrinsic.empty()) {
       std::ostringstream result;
@@ -1375,6 +1478,9 @@ std::string CppCodeGen::expression(ExprPtr expr) {
         !targetType->pointerBase->isVoid()) {
       right = "static_cast<" + type(targetType) + ">(" + right + ")";
     }
+    if (value->op == "=") {
+      right = decayToPointer(right, sourceType, targetType);
+    }
     return expression(value->target) + " " + value->op + " " + right;
   }
   if (auto value = std::dynamic_pointer_cast<MemberAccessExprAST>(expr)) {
@@ -1406,10 +1512,18 @@ std::string CppCodeGen::expression(ExprPtr expr) {
   }
   
   if (auto value = std::dynamic_pointer_cast<IndexExprAST>(expr)) {
-    if (value->target && value->target->inferredType &&
-        value->target->inferredType->isHashMap()) {
+    TypePtr targetType = value->target && value->target->inferredType
+                             ? value->target->inferredType->underlyingType()
+                             : nullptr;
+    if (targetType && targetType->isHashMap()) {
       return "glang::map_get(" + expression(value->target) + ", " +
              expression(value->index) + ")";
+    }
+    if (targetType && targetType->name == "List" &&
+        targetType->isStruct() && targetType->typeArgs.size() == 1 &&
+        !m_listTypes.count(targetType->name)) {
+      return "(&(*" + expression(value->target) + ".storage))[" +
+             expression(value->index) + "]";
     }
     return expression(value->target) + "[" + expression(value->index) + "]";
   }
@@ -1471,8 +1585,11 @@ std::string CppCodeGen::expression(ExprPtr expr) {
                identifier(fieldName) + ", " + expression(initializer.second) +
                "); return " + temporary + "; }())";
       }
+      std::string fieldValue =
+          decayToPointer(expression(initializer.second),
+                         initializer.second->inferredType, fieldType);
       return type(value->inferredType) + "{." + identifier(fieldName) +
-             " = " + expression(initializer.second) + "}";
+             " = " + fieldValue + "}";
     }
     std::vector<ExprPtr> orderedFields(
         structType && structType->isStruct() ? structType->fields.size() : 0);
@@ -1532,7 +1649,10 @@ std::string CppCodeGen::expression(ExprPtr expr) {
                   << expression(orderedFields[i]) << "); ";
           }
         } else {
-          block << member << " = " << expression(orderedFields[i]) << "; ";
+          block << member << " = "
+                << decayToPointer(expression(orderedFields[i]),
+                                  orderedFields[i]->inferredType, fieldType)
+                << "; ";
         }
       }
       block << "return " << temporary << "; }())";
@@ -1542,19 +1662,34 @@ std::string CppCodeGen::expression(ExprPtr expr) {
     out << type(value->inferredType) << "{";
     for (size_t i = 0; i < orderedFields.size(); ++i) {
       if (i) out << ", ";
-      if (orderedFields[i]) out << expression(orderedFields[i]);
-      else out << "{}";
+      if (orderedFields[i]) {
+        TypePtr fieldType =
+            structType && structType->isStruct() && i < structType->fields.size()
+                ? structType->fields[i].type
+                : nullptr;
+        out << decayToPointer(expression(orderedFields[i]),
+                              orderedFields[i]->inferredType, fieldType);
+      } else {
+        out << "{}";
+      }
     }
     return out.str() + "}";
   }
   if (auto value = std::dynamic_pointer_cast<IfExprAST>(expr)) {
     std::string retType = type(value->inferredType);
+    std::string thenValue = decayToPointer(expression(value->thenBranch),
+                                           value->thenBranch->inferredType,
+                                           value->inferredType);
     std::string result = "(" + lambdaCapture() + "() -> " + retType +
                          " { if (" + expression(value->condition) +
-                         ") { return " + expression(value->thenBranch) + "; } ";
-    if (value->elseBranch)
-      result += "return " + expression(value->elseBranch) + "; ";
-    else
+                         ") { return " + thenValue + "; } ";
+    if (value->elseBranch) {
+      result += "return " +
+                decayToPointer(expression(value->elseBranch),
+                               value->elseBranch->inferredType,
+                               value->inferredType) +
+                "; ";
+    } else
       result += "return " + retType + "{}; ";
     return result + "}())";
   }
@@ -1680,7 +1815,9 @@ std::string CppCodeGen::expression(ExprPtr expr) {
   }
   if (auto value = std::dynamic_pointer_cast<ClosureExprAST>(expr)) {
     const bool prevMain = m_inMainFunction;
+    TypeASTPtr previousReturnType = m_currentReturnTypeAst;
     m_inMainFunction = false;
+    m_currentReturnTypeAst = value->returnTypeAst;
 
     std::string result = lambdaCapture() + "(";
       for (size_t i = 0; i < value->params.size() ; ++i) {
@@ -1694,6 +1831,7 @@ std::string CppCodeGen::expression(ExprPtr expr) {
     } else {
         result +=  "{\n" + expression(value->body) + "\n}\n";
     }
+    m_currentReturnTypeAst = previousReturnType;
     m_inMainFunction = prevMain;
     return result;
   }
@@ -1721,7 +1859,7 @@ std::string CppCodeGen::generate(const std::vector<ASTNodePtr>& nodes,
         << "#include <span>\n#include <vector>\n#include <iterator>\n#include <type_traits>\n"
         << "#include <concepts>\n#include <cstring>\n#include <initializer_list>\n\n"
         << "#include <stdexcept>\n"
-        << "#include <cstdio>\n\n"
+        << "#include <cstdio>\n#include <cstdlib>\n\n"
         ;
 
     std::set<std::string> cppIncludes;
@@ -1744,6 +1882,7 @@ std::string CppCodeGen::generate(const std::vector<ASTNodePtr>& nodes,
     out << "namespace glang {\n"
         << "template<class T> void list_push(std::vector<T>* list, T value) { list->push_back(std::move(value)); }\n"
         << "template<class T> int list_length(const std::vector<T>* list) { return static_cast<int>(list->size()); }\n"
+        << "template<class T> std::span<T> slice_from_ptr(T* data, int count) { return std::span<T>(data, count > 0 ? static_cast<std::size_t>(count) : 0); }\n"
         << "template <class Destination, class Source>\n"
         << "void array_copy(Destination& destination, const Source& source) {\n"
         << "  using Element = std::remove_reference_t<decltype(*std::begin(destination))>;\n"
@@ -1952,10 +2091,6 @@ std::string CppCodeGen::generate(const std::vector<ASTNodePtr>& nodes,
         << "Lazy<std::remove_cv_t<U>> lazy_from_span(std::span<U, E> values) {\n"
         << "  using T = std::remove_cv_t<U>;\n"
         << "  return lazy_from_vector<T>(std::vector<T>(values.begin(), values.end()));\n"
-        << "}\n"
-        << "template <class T>\n"
-        << "Lazy<T> lazy_from_list(std::vector<T> values) {\n"
-        << "  return lazy_from_vector<T>(std::move(values));\n"
         << "}\n"
         << "inline Lazy<char> lazy_from_cstr(const char* text) {\n"
         << "  std::vector<char> values;\n"
@@ -2199,11 +2334,22 @@ std::string CppCodeGen::generate(const std::vector<ASTNodePtr>& nodes,
         << "  });\n"
         << "}\n"
         << "template <class T>\n"
-        << "std::vector<T> lazy_to_vector(Lazy<T> source) {\n"
-        << "  std::vector<T> result;\n"
+        << "std::tuple<T*, int> lazy_to_buffer(Lazy<T> source) {\n"
+        << "  std::size_t capacity = 0;\n"
+        << "  std::size_t count = 0;\n"
+        << "  T* buffer = nullptr;\n"
         << "  T value{};\n"
-        << "  while (source.next(value)) result.push_back(value);\n"
-        << "  return result;\n"
+        << "  while (source.next(value)) {\n"
+        << "    if (count == capacity) {\n"
+        << "      const std::size_t grown = capacity == 0 ? 8 : capacity * 2;\n"
+        << "      T* resized = static_cast<T*>(std::realloc(buffer, grown * sizeof(T)));\n"
+        << "      if (!resized) { std::free(buffer); return std::make_tuple(static_cast<T*>(nullptr), 0); }\n"
+        << "      buffer = resized;\n"
+        << "      capacity = grown;\n"
+        << "    }\n"
+        << "    buffer[count++] = value;\n"
+        << "  }\n"
+        << "  return std::make_tuple(buffer, static_cast<int>(count));\n"
         << "}\n"
         << "template <class T, class U, class F>\n"
         << "U lazy_fold(Lazy<T> source, U initial, F fn) {\n"
@@ -2348,7 +2494,8 @@ std::string CppCodeGen::generate(const std::vector<ASTNodePtr>& nodes,
     }
     auto isBoxIntrinsic = [](const std::string& name) {
       static const char* suffixes[] = {"__new_box", "__new_box_with_deleter",
-                                       "__box_from", "__adopt_box"};
+                                       "__box_from", "__adopt_box",
+                                       "__new_box_array", "__box_use_count"};
       for (const char* suffix : suffixes) {
         const std::string value = suffix;
         if (name == value ||

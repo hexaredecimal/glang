@@ -10,7 +10,7 @@ struct Path {
 }
 
 /// Construct a Path from a C string. `null` produces an empty path.
-Path make_path(const char* text) {
+Path Path::new(const char* text) {
     Path result;
     result.length = 0;
     result.data[0] = '\0';
@@ -27,16 +27,15 @@ Path make_path(const char* text) {
     return result;
 }
 
-Path std::fs::make_path(const char* text) => make_path(text);
-Path std::fs::to_path(const char* text) => make_path(text);
+Path std::fs::make_path(const char* text) => Path::new(text);
+Path std::fs::to_path(const char* text) => Path::new(text);
 
 /// Pointer to the Path's NUL-terminated buffer. The pointer is valid while
 /// the Path value remains alive and unmodified.
 const char* path_c_str(Path* path) => &path.data[0];
 
 const char* c_str(Path* path) => path_c_str(path);
-const char* to_string(Path* path) => path_c_str(path);
-const char* std::fs::to_string(Path* path) => path_c_str(path);
+const char* std::fs::c_str(Path* path) => path_c_str(path);
 
 int path_length(Path path) => path.length;
 int len(Path path) => path.length;
@@ -80,7 +79,7 @@ Path std::fs::append_path(Path path, const char* text) => append_path(path, text
 /// Join two path components with a single separator. A separator is omitted
 /// when the left side already ends with one or the right side starts with one.
 Path join_path(const char* left, const char* right) {
-    Path result = make_path(left);
+    Path result = Path::new(left);
     if (right == nullptr || right[0] == '\0') {
         return result;
     }
@@ -293,3 +292,4 @@ const char* file_name(const char* path) => std::fs::file_name(path);
 const char* extension(const char* path) => std::fs::extension(path);
 bool has_extension(const char* path, const char* extension) =>
     std::fs::has_extension(path, extension);
+Path to_path(const char* text) => Path::new(text);

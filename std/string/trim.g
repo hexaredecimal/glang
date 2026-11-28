@@ -1,4 +1,5 @@
 import std.string.prelude;
+import std.string.string;
 import std.string.len;
 import std.chars.types;
 
@@ -17,84 +18,92 @@ bool std::string::is_blank(const char* text) {
     return true;
 }
 
-/// Remove leading whitespace by shifting the remaining bytes left.
-void std::string::trim_left(char* text) {
+/// Copy of `text` without leading whitespace. The input is not modified.
+String std::string::trim_left(const char* text) {
     if (text == nullptr) {
-        return;
+        return String::new();
     }
     int start = 0;
     while (text[start] != '\0' && std::chars::is_space(text[start])) {
         start = start + 1;
     }
-    if (start == 0) {
-        return;
-    }
-    int index = 0;
-    while (text[start + index] != '\0') {
-        text[index] = text[start + index];
-        index = index + 1;
-    }
-    text[index] = '\0';
+    return String::from(text + start);
 }
 
-/// Remove trailing whitespace by writing an earlier terminator.
-void std::string::trim_right(char* text) {
+/// Copy of `text` without trailing whitespace. The input is not modified.
+String std::string::trim_right(const char* text) {
     if (text == nullptr) {
-        return;
+        return String::new();
     }
-    int length = text.length() as int;
+    int length = std::string::length(text) as int;
     while (length > 0 && std::chars::is_space(text[length - 1])) {
         length = length - 1;
     }
-    text[length] = '\0';
+    return String::from(text, length as ulong);
 }
 
-void std::string::trim(char* text) {
-    std::string::trim_left(text);
-    std::string::trim_right(text);
+/// Copy of `text` without leading or trailing whitespace.
+String std::string::trim(const char* text) {
+    auto left = std::string::trim_left(text);
+    return std::string::trim_right(left.c_str());
 }
 
-/// Remove leading occurrences of `character`.
-void std::string::trim_left(char* text, char character) {
+/// Copy of `text` without leading occurrences of `character`.
+String std::string::trim_left(const char* text, char character) {
     if (text == nullptr) {
-        return;
+        return String::new();
     }
     int start = 0;
     while (text[start] == character) {
         start = start + 1;
     }
-    if (start == 0) {
-        return;
-    }
-    int index = 0;
-    while (text[start + index] != '\0') {
-        text[index] = text[start + index];
-        index = index + 1;
-    }
-    text[index] = '\0';
+    return String::from(text + start);
 }
 
-/// Remove trailing occurrences of `character`.
-void std::string::trim_right(char* text, char character) {
+/// Copy of `text` without trailing occurrences of `character`.
+String std::string::trim_right(const char* text, char character) {
     if (text == nullptr) {
-        return;
+        return String::new();
     }
-    int length = text.length() as int;
+    int length = std::string::length(text) as int;
     while (length > 0 && text[length - 1] == character) {
         length = length - 1;
     }
-    text[length] = '\0';
+    return String::from(text, length as ulong);
 }
 
-void std::string::trim(char* text, char character) {
-    std::string::trim_left(text, character);
-    std::string::trim_right(text, character);
+/// Copy of `text` without leading or trailing occurrences of `character`.
+String std::string::trim(const char* text, char character) {
+    auto left = std::string::trim_left(text, character);
+    return std::string::trim_right(left.c_str(), character);
 }
+
+// String-receiver overloads make the same operations available through UFCS
+// without converting to a C string at the call site.
+
+bool String::is_blank(String* self) =>
+    std::string::is_blank(String::c_str(self));
+
+String String::trim_left(String* self) =>
+    std::string::trim_left(String::c_str(self));
+String String::trim_right(String* self) =>
+    std::string::trim_right(String::c_str(self));
+String String::trim(String* self) =>
+    std::string::trim(String::c_str(self));
+String String::trim_left(String* self, char character) =>
+    std::string::trim_left(String::c_str(self), character);
+String String::trim_right(String* self, char character) =>
+    std::string::trim_right(String::c_str(self), character);
+String String::trim(String* self, char character) =>
+    std::string::trim(String::c_str(self), character);
 
 bool is_blank(const char* text) => std::string::is_blank(text);
-void trim_left(char* text) => std::string::trim_left(text);
-void trim_right(char* text) => std::string::trim_right(text);
-void trim(char* text) => std::string::trim(text);
-void trim_left(char* text, char character) => std::string::trim_left(text, character);
-void trim_right(char* text, char character) => std::string::trim_right(text, character);
-void trim(char* text, char character) => std::string::trim(text, character);
+String trim_left(const char* text) => std::string::trim_left(text);
+String trim_right(const char* text) => std::string::trim_right(text);
+String trim(const char* text) => std::string::trim(text);
+String trim_left(const char* text, char character) =>
+    std::string::trim_left(text, character);
+String trim_right(const char* text, char character) =>
+    std::string::trim_right(text, character);
+String trim(const char* text, char character) =>
+    std::string::trim(text, character);

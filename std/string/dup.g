@@ -1,30 +1,14 @@
-
 import std.string.prelude;
-import std.string.len;
-import std.memory.owned;
+import std.string.owned;
+import std.result;
 
-[[extern, c_abi]]
-char* strdup(const char* src);
+/// Duplicate `src` into a newly allocated `String`.
+Result<String> std::string::dup(const char* src) =>
+    std::string::own(src);
 
-[[extern, c_abi]]
-char* strndup(const char* src, size_t count);
+/// Duplicate at most `count` characters of `src`.
+Result<String> std::string::dup(const char* src, ulong count) =>
+    std::string::own(src, count);
 
-
-Result<std::memory::Owned<char>> std::string::dup(const char* src) {
-    auto ptr = src.strdup(); 
-    if (ptr == nullptr) {
-        return std::error("std::string::dup: Failed to duplicate string");
-    }
-    return std::ok(std::memory::Owned{ptr, src.length() + 1});
-}
-
-Result<std::memory::Owned<char>> std::string::dup(const char* src, ulong count) {
-    auto ptr = src.strndup(count); 
-    if (ptr == nullptr) {
-        return std::error("std::string::dup: Failed to duplicate string");
-    }
-    return std::ok(std::memory::Owned{ptr, ptr.length() + 1});
-}
-
-Result<std::memory::Owned<char>> dup(const char* str) => std::string::dup(str);
-Result<std::memory::Owned<char>> dup(const char* str, ulong count) => std::string::dup(str, count);
+Result<String> dup(const char* str) => std::string::dup(str);
+Result<String> dup(const char* str, ulong count) => std::string::dup(str, count);

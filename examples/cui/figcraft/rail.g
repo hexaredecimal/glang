@@ -46,15 +46,26 @@ Widget* buildRail() {
     |> set_bg(fcPanel(dark))
     |> set_border(1.0, fcDivider(dark));
 
-  // Top FigCraft brand mark + subtle divider
-  auto logo = Box::new()
-    |> set_size(27px, 27px)
+  // Top FigCraft brand mark + subtle divider (opens File Management & Exit menu)
+  auto logo = BBox::new()
+    |> set_id("fc-rail-logo")
+    |> set_size(30px, 30px)
     |> set_align(GuiAlign::GuiAlignCenter)
     |> set_justify(GuiJustify::GuiJustifyCenter)
-    |> set_bg(fcGreenSoft(dark))
+    |> set_bg(pickColor(ed.showMainMenu, fcGreen(), fcGreenSoft(dark)))
+    |> set_hover_bg(pickColor(ed.showMainMenu, fcGreen(), fcGreenBorder(dark)))
+    |> set_border(pickFloat(ed.showMainMenu, 1.5, 1.0), pickColor(ed.showMainMenu, fcGreenDark(), fcGreenBorder(dark)))
     |> set_radius(8.0)
-    |> set_tooltip("FigCraft Studio");
-  logo.add(Icon::new() |> set_icon(std::cui::icons::star()) |> set_text_size(14.0) |> set_text_color(fcGreenDark()));
+    |> set_tooltip("FigCraft menu")
+    |> on_click() {
+      -> ed.showMainMenu = !ed.showMainMenu;
+         ed.openFlyout = -1;
+         return;
+    };
+  logo.add(Icon::new()
+    |> set_icon(std::cui::icons::star())
+    |> set_text_size(14.0)
+    |> set_text_color(pickColor(ed.showMainMenu, fcNavy(), fcGreenDark())));
   rail.add(logo);
 
   auto logoGap = Column::new()
@@ -70,7 +81,7 @@ Widget* buildRail() {
 
   rail.add(Spacer::new() |> set_size(fill(), fill()));
 
-  auto helpBtn = Box::new()
+  auto helpBtn = BBox::new()
     |> set_id("fc-rail-help")
     |> set_size(32px, 32px)
     |> set_align(GuiAlign::GuiAlignCenter)

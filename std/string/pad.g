@@ -5,7 +5,7 @@ import std.string.builder;
 
 /// Pad `text` on the left to `width` bytes with `fill`.
 StringBuilder pad_left(const char* text, int width, char fill) {
-    StringBuilder result = builder();
+    StringBuilder result = StringBuilder::new();
     if (text == nullptr) {
         return result;
     }
@@ -38,7 +38,7 @@ StringBuilder pad_end(const char* text, int width, char fill) =>
 /// Center `text` in `width` bytes. When the padding is odd, the extra byte
 /// goes on the right.
 StringBuilder pad_center(const char* text, int width, char fill) {
-    StringBuilder result = builder();
+    StringBuilder result = StringBuilder::new();
     if (text == nullptr) {
         return result;
     }
@@ -62,14 +62,14 @@ StringBuilder pad_center(const char* text, int width, char fill) {
 /// front of the padding.
 StringBuilder zfill(const char* text, int width) {
     if (text == nullptr) {
-        return builder();
+        return StringBuilder::new();
     }
     int length = text.length() as int;
     if (length >= width) {
         return builder_from(text);
     }
     if (text[0] == '+' || text[0] == '-') {
-        StringBuilder result = builder();
+        StringBuilder result = StringBuilder::new();
         result = builder_append_char(result, text[0]);
         int zeros = width - length;
         for (int count = 0; count < zeros; count = count + 1) {
@@ -85,7 +85,7 @@ StringBuilder zfill(const char* text, int width) {
 
 /// Keep at most `width` leading bytes of `text`.
 StringBuilder truncate_width(const char* text, int width) {
-    StringBuilder result = builder();
+    StringBuilder result = StringBuilder::new();
     if (text == nullptr || width <= 0) {
         return result;
     }
@@ -102,7 +102,7 @@ StringBuilder truncate_width(const char* text, int width) {
 
 /// Repeat `text` `count` times. Non-positive counts produce an empty builder.
 StringBuilder repeat_text(const char* text, int count) {
-    StringBuilder result = builder();
+    StringBuilder result = StringBuilder::new();
     if (text == nullptr || count <= 0) {
         return result;
     }
